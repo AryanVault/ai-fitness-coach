@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -232,12 +232,11 @@ export default function OnboardingPage() {
         </CardHeader>
 
         <CardContent className="pt-6">
-          <AnimatePresence mode="wait">
+          <>
             <motion.div
               key={currentStep}
-              initial={{ opacity: 0, x: 20 }}
+              initial={false}
               animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.3 }}
             >
               {/* Welcome Step */}
@@ -641,7 +640,7 @@ export default function OnboardingPage() {
                 </div>
               )}
             </motion.div>
-          </AnimatePresence>
+          </>
 
           {/* Navigation */}
           <div className="flex justify-between mt-8 pt-6 border-t">

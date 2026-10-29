@@ -127,7 +127,7 @@ export default function AchievementsPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6 lg:p-8">
-      <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }}>
+      <motion.div initial={false} animate={{ opacity: 1, y: 0 }}>
         <h1 className="text-2xl font-bold md:text-3xl">Achievements</h1>
         <p className="mt-1 text-muted-foreground">Live milestone progress based on your real sessions, streaks, and saved checkpoints.</p>
       </motion.div>

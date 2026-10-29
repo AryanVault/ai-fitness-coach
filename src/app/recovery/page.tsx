@@ -4,10 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { BatteryCharging, BedDouble, Droplets, HeartPulse, Loader2, Save, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { requestJson } from "@/lib/client/request";
 
 type RecoveryCheckIn = {
   sleepHours: number;
@@ -45,24 +45,36 @@ export default function RecoveryPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     const load = async () => {
-      const response = await fetch("/api/recovery/checkin", { cache: "no-store" });
-      if (response.ok) {
-        const data = await response.json();
-        if (!cancelled && data.recoveryCheckIn) {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const data = await requestJson<{ recoveryCheckIn: RecoveryCheckIn | null }>("/api/recovery/checkin", {
+          cache: "no-store", credentials: "include", signal: controller.signal,
+        });
+        if (!data || !("recoveryCheckIn" in data)) throw new Error("Invalid check-in response");
+        if (!cancelled) {
           setCheckIn({ ...defaultCheckIn, ...data.recoveryCheckIn });
         }
+      } catch {
+        if (!cancelled) setLoadError("Could not load your recovery check-in. Retry before editing to avoid replacing saved ratings.");
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      if (!cancelled) setLoading(false);
     };
     void load();
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, []);
+  }, [loadAttempt]);
 
   const recoveryScore = Math.round(
     Math.min(
@@ -76,34 +88,49 @@ export default function RecoveryPage() {
 
   const update = (key: keyof RecoveryCheckIn, value: string | number) => {
     setSaved(false);
+    setSaveError(null);
     setCheckIn((prev) => ({ ...prev, [key]: value }));
   };
 
   const save = async () => {
+    if (loading || loadError || saving) return;
     setSaving(true);
-    const response = await fetch("/api/recovery/checkin", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(checkIn),
-    });
-    if (response.ok) setSaved(true);
-    setSaving(false);
+    setSaved(false);
+    setSaveError(null);
+    try {
+      const data = await requestJson<{ recoveryCheckIn: RecoveryCheckIn }>("/api/recovery/checkin", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(checkIn),
+      });
+      if (!data?.recoveryCheckIn) throw new Error("Invalid check-in response");
+      setCheckIn({ ...defaultCheckIn, ...data.recoveryCheckIn });
+      setSaved(true);
+    } catch {
+      setSaveError("Could not save your check-in. Your edits are still here. Retry saving.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6 lg:p-8">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
-          <Badge className="mb-3">Recovery OS</Badge>
-          <h1 className="text-3xl font-black uppercase leading-none md:text-5xl">Daily recovery check-in</h1>
+          <h1 className="text-3xl font-black leading-tight md:text-5xl">Daily recovery check-in</h1>
           <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
-            Feed sleep, stress, soreness, hydration, and energy into the coach so readiness and weekly plans adapt like a wearable.
+            Record sleep, stress, soreness, hydration and energy for your next coach refresh.
           </p>
         </div>
-        <Link href="/dashboard">
-          <Button variant="outline">Back to dashboard</Button>
-        </Link>
+        <Button variant="ghost" asChild><Link href="/dashboard">Back to dashboard</Link></Button>
       </div>
+
+      {loadError ? (
+        <div role="alert" className="space-y-3 rounded-lg bg-muted p-5">
+          <p className="text-sm">{loadError}</p>
+          <Button onClick={() => setLoadAttempt(attempt => attempt + 1)}>Retry loading check-in</Button>
+        </div>
+      ) : null}
 
       <div className="grid gap-5 lg:grid-cols-[0.75fr_1.25fr]">
         <Card className="border-primary/20">
@@ -112,7 +139,7 @@ export default function RecoveryPage() {
               <BatteryCharging className="h-5 w-5 text-primary" />
               Recovery estimate
             </CardTitle>
-            <CardDescription>This updates the next coach-agent refresh.</CardDescription>
+            <CardDescription>A simple estimate from the ratings below, not a medical or wearable measurement.</CardDescription>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -120,10 +147,12 @@ export default function RecoveryPage() {
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Loading latest check-in
               </div>
+            ) : loadError ? (
+              <p className="text-sm text-muted-foreground">Estimate unavailable until your check-in loads.</p>
             ) : (
               <>
                 <p className="text-7xl font-black leading-none text-primary">{recoveryScore}</p>
-                <p className="mt-2 text-sm uppercase text-muted-foreground">estimated readiness input</p>
+                <p className="mt-2 text-sm text-muted-foreground">{saved ? "Saved ratings" : "Current ratings"}</p>
                 <div className="mt-5 h-2 rounded-full bg-muted">
                   <div className="h-full rounded-full bg-primary" style={{ width: `${recoveryScore}%` }} />
                 </div>
@@ -145,7 +174,8 @@ export default function RecoveryPage() {
             <CardTitle>Check-in signals</CardTitle>
             <CardDescription>Use honest 1-5 ratings. The coach will use this instead of guessing.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-5">
+          <CardContent>
+            <fieldset disabled={loading || Boolean(loadError) || saving} className="min-w-0 space-y-5 disabled:opacity-60">
             <div className="rounded-lg border bg-background/45 p-4">
               <div className="flex items-center justify-between gap-4">
                 <Label htmlFor="sleepHours">Sleep hours</Label>
@@ -217,8 +247,10 @@ export default function RecoveryPage() {
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 Save recovery check-in
               </Button>
-              {saved ? <Badge variant="secondary">Saved. Dashboard readiness will refresh from this signal.</Badge> : null}
+              {saved ? <p role="status" className="text-sm">Check-in saved. It will inform the next coach refresh.</p> : null}
             </div>
+            </fieldset>
+            {saveError ? <p role="alert" className="mt-3 text-sm">{saveError}</p> : null}
           </CardContent>
         </Card>
       </div>

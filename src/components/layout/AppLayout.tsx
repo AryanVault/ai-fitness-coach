@@ -1,15 +1,36 @@
 "use client";
-import { toast } from "sonner";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { signOut } from "@/lib/auth/client";
-import { clearDemoSession, isDemoUser } from "@/lib/dummy-auth";
+import { toast } from "sonner";
+import {
+  Activity,
+  BatteryCharging,
+  Calendar,
+  ClipboardCheck,
+  Dumbbell,
+  Home,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  MessageSquare,
+  Music2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings,
+  TrendingUp,
+  Trophy,
+  User,
+  Users,
+  Utensils,
+} from "lucide-react";
+import { isDemoUser } from "@/lib/dummy-auth";
 import { useUserProfile } from "@/hooks/useUserProfile";
 import { cn } from "@/lib/utils";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { BrandMark } from "@/components/brand/BrandMark";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,339 +40,307 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import {
-  Activity,
-  BatteryCharging,
-  Calendar,
-  ClipboardCheck,
-  CircleGauge,
-  Dumbbell,
-  Home,
-  LayoutDashboard,
-  LogOut,
-  Menu,
-  MessageSquare,
-  Moon,
-  Music2,
-  Settings,
-  Sun,
-  Target,
-  TrendingUp,
-  Trophy,
-  User,
-  Users,
-  Utensils,
-  Zap,
-} from "lucide-react";
+  Sheet,
+  SheetContent,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 
 const mainNavItems = [
   { href: "/", label: "Home", icon: Home },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/review-lab", label: "Review Lab", icon: ClipboardCheck },
-  { href: "/profiles", label: "Profiles", icon: Users },
-  { href: "/workouts", label: "Workouts", icon: Dumbbell },
-  { href: "/workout-plans", label: "Plans", icon: Calendar },
-  { href: "/nutrition", label: "Nutrition", icon: Utensils },
-  { href: "/progress", label: "Progress", icon: TrendingUp },
+  { href: "/review-lab", label: "Session journal", icon: ClipboardCheck },
+  { href: "/workouts", label: "Movement library", icon: Dumbbell },
+  { href: "/workout-plans", label: "Training plans", icon: Calendar },
+  { href: "/nutrition", label: "Food & nutrition", icon: Utensils },
+  { href: "/progress", label: "Your progress", icon: TrendingUp },
   { href: "/recovery", label: "Recovery", icon: BatteryCharging },
-  { href: "/achievements", label: "Achievements", icon: Trophy },
+  { href: "/achievements", label: "Milestones", icon: Trophy },
+  { href: "/profiles", label: "Profiles", icon: Users },
 ];
-
 const coachNavItems = [
-  { href: "/coach/chat", label: "AI Coach", icon: MessageSquare },
-  { href: "/coach/workout", label: "Workout Coach", icon: Activity },
-  { href: "/coach/dance", label: "Dance Coach", icon: Music2 },
+  { href: "/coach/workout", label: "Workout coach", icon: Activity },
+  { href: "/coach/dance", label: "Dance studio", icon: Music2 },
+  { href: "/coach/chat", label: "Ask your coach", icon: MessageSquare },
 ];
-
-const publicRoutes = new Set(["/", "/login", "/signup"]);
-const minimalRoutes = new Set(["/onboarding"]);
+const publicRoutes = new Set([
+  "/",
+  "/login",
+  "/signup",
+  "/demo",
+  "/review-lab/methodology",
+]);
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { profile, session, loading } = useUserProfile();
   const demoMode = Boolean(session?.user?.id && isDemoUser(session.user.id));
-  const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    const sync = () => setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
-    sync();
-    const observer = new MutationObserver(sync);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const collapsed = localStorage.getItem("sidebar-collapsed") === "true";
-    setSidebarCollapsed(collapsed);
-  }, []);
-
-  const isPublicRoute = publicRoutes.has(pathname) || ["/sign-in", "/sign-up", "/sign-out"].some(path => pathname === path || pathname.startsWith(path + "/"));
-  const isMinimalRoute = minimalRoutes.has(pathname);
-
-  const navTitle = useMemo(() => {
-    return (
-      mainNavItems.find((item) => item.href === pathname)?.label ||
-      coachNavItems.find((item) => item.href === pathname)?.label ||
-      "FitCoach AI"
-    );
-  }, [pathname]);
-
-  const toggleTheme = async () => {
-    const next = document.documentElement.classList.contains("dark") ? "light" : "dark";
     try {
-      const response = await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme: next }) });
-      if (!response.ok) throw new Error("Theme preference could not be saved");
-      document.documentElement.classList.toggle("dark", next === "dark");
-    } catch { toast.error("Theme preference could not be saved. Please retry."); }
-  };
+      setSidebarCollapsed(localStorage.getItem("sidebar-collapsed") === "true");
+    } catch {
+      /* Storage is optional in private browsing. */
+    }
+  }, []);
 
+  const isPublicRoute =
+    publicRoutes.has(pathname) ||
+    ["/sign-in", "/sign-up", "/sign-out"].some(
+      (path) => pathname === path || pathname.startsWith(`${path}/`),
+    );
+  const navTitle = useMemo(
+    () =>
+      [...mainNavItems, ...coachNavItems].find((item) => pathname === item.href)
+        ?.label ??
+      (pathname.startsWith("/review-lab/") ? "Session journal" : "FitCoach"),
+    [pathname],
+  );
+
+  const closeNavigation = () => {
+    setMobileOpen(false);
+  };
   const toggleSidebar = () => {
-    setSidebarCollapsed((prev) => {
-      localStorage.setItem("sidebar-collapsed", String(!prev));
-      return !prev;
-    });
+    const next = !sidebarCollapsed;
+    setSidebarCollapsed(next);
+    try {
+      localStorage.setItem("sidebar-collapsed", String(next));
+    } catch {
+      /* The current session still works. */
+    }
   };
-
-  const handleLogout = async () => {
+  const setAppearance = async (theme: "light" | "dark" | "system") => {
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ theme }),
+      });
+      if (!response.ok) throw new Error("Could not save appearance");
+      document.documentElement.classList.toggle(
+        "dark",
+        theme === "dark" ||
+          (theme === "system" &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches),
+      );
+      toast.success("Appearance updated");
+    } catch {
+      toast.error("Appearance could not be saved. Please retry.");
+    }
+  };
+  const handleLogout = () => {
+    closeNavigation();
     window.dispatchEvent(new Event("fitcoach:stop-camera"));
     router.push("/sign-out");
   };
 
-  if (isPublicRoute || isMinimalRoute) {
-    return <div className="performance-shell min-h-screen bg-background">{children}</div>;
-  }
-
-  const NavLink = ({ href, label, icon: Icon }: { href: string; label: string; icon: typeof Home }) => {
-    const isActive = pathname === href;
-    return (
-      <Link
-        href={href}
-        onClick={() => setMobileOpen(false)}
-        className={cn(
-          "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-all",
-          isActive ? "bg-primary text-primary-foreground shadow-[0_0_30px_color-mix(in_oklch,var(--primary)_22%,transparent)]" : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
-          sidebarCollapsed && "justify-center px-2",
-        )}
+  if (isPublicRoute)
+    return pathname === "/" ? (
+      <>{children}</>
+    ) : (
+      <main
+        id="main-content"
+        className="performance-shell workspace min-h-screen bg-background"
       >
-        <Icon className={cn("h-5 w-5 shrink-0", isActive ? "text-primary-foreground" : "group-hover:text-primary")} />
-        {!sidebarCollapsed && <span>{label}</span>}
-      </Link>
+        {children}
+      </main>
     );
-  };
+  if (pathname === "/onboarding")
+    return (
+      <main id="main-content" className="workspace min-h-screen bg-background">
+        {children}
+      </main>
+    );
 
-  const sidebar = (
-    <div className="flex h-full flex-col">
-      <div className={cn("flex items-center gap-3 px-4 py-6", sidebarCollapsed && "justify-center px-2")}>
-        <div className="relative flex h-11 w-11 items-center justify-center rounded-full border border-primary/30 bg-primary/10 shadow-[0_0_30px_color-mix(in_oklch,var(--primary)_20%,transparent)]">
-          <CircleGauge className="h-6 w-6 text-primary" />
-          <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-accent shadow-[0_0_16px_var(--accent)]" />
-        </div>
-        {!sidebarCollapsed && (
-          <div>
-            <h1 className="text-sm font-black uppercase tracking-[0.18em]">FitCoach AI</h1>
-            <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">strain recovery skill</p>
-          </div>
-        )}
-      </div>
-
+  const navLinks = (items: typeof mainNavItems, compact = false) =>
+    items.map(({ href, label, icon: Icon }) => (
+      <Link
+        key={href}
+        href={href}
+        onClick={closeNavigation}
+        className="app-nav-link"
+        aria-current={
+          pathname === href ||
+          (href === "/review-lab" && pathname.startsWith("/review-lab/"))
+            ? "page"
+            : undefined
+        }
+        aria-label={compact ? label : undefined}
+        title={compact ? label : undefined}
+      >
+        <Icon aria-hidden="true" />
+        {!compact && <span>{label}</span>}
+      </Link>
+    ));
+  const sidebar = (compact = false) => (
+    <div className={cn("flex h-full flex-col", compact && "app-nav-compact")}>
+      <Link
+        href="/dashboard"
+        onClick={closeNavigation}
+        className={cn("app-brand", compact && "justify-center px-2")}
+        aria-label="FitCoach dashboard"
+      >
+        <BrandMark />
+        {!compact && "FitCoach"}
+      </Link>
       <ScrollArea className="flex-1 px-3">
-        <div className="space-y-1">
-          {mainNavItems.map((item) => (
-            <NavLink key={item.href} {...item} />
-          ))}
-        </div>
-        <div className={cn("my-4 px-3 text-[10px] font-bold uppercase tracking-[0.24em] text-muted-foreground", sidebarCollapsed && "hidden")}>
-          AI Coaching
-        </div>
-        <div className="space-y-1">
-          {coachNavItems.map((item) => (
-            <NavLink key={item.href} {...item} />
-          ))}
-        </div>
+        <nav aria-label="Your practice">
+          {navLinks(mainNavItems, compact)}
+          {!compact && <p className="app-nav-group">In the studio</p>}
+          {compact && <div className="h-5" />}
+          {navLinks(coachNavItems, compact)}
+        </nav>
       </ScrollArea>
-
-      <div className="border-t border-sidebar-border p-3">
+      {demoMode && !compact && (
+        <p className="app-demo-note">Demo session · sample data</p>
+      )}
+      <div className="p-3">
         <Link
           href="/settings"
-          className={cn(
-            "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
-            pathname === "/settings" && "bg-primary text-primary-foreground",
-            sidebarCollapsed && "justify-center px-2",
-          )}
+          onClick={closeNavigation}
+          className="app-nav-link"
+          aria-current={pathname === "/settings" ? "page" : undefined}
+          aria-label={compact ? "Settings" : undefined}
+          title={compact ? "Settings" : undefined}
         >
-          <Settings className="h-5 w-5" />
-          {!sidebarCollapsed && <span>Settings</span>}
+          <Settings aria-hidden="true" />
+          {!compact && "Settings"}
         </Link>
       </div>
     </div>
   );
 
-  const initials =
-    profile?.name
-      ?.split(" ")
-      .map((part) => part[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase() || "FC";
-
-  return (
-    <div className="performance-shell min-h-screen bg-background">
-      <aside
-        className={cn(
-          "fixed left-0 top-0 z-40 hidden h-screen border-r border-sidebar-border bg-sidebar/90 shadow-[24px_0_90px_rgba(0,0,0,0.24)] backdrop-blur-xl transition-all duration-300 lg:block",
-          sidebarCollapsed ? "w-[72px]" : "w-64",
-        )}
-      >
-        {sidebar}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={toggleSidebar}
-          className="absolute -right-3 top-20 h-6 w-6 rounded-full border bg-card shadow-md"
-        >
-          <Target className="h-3 w-3" />
-        </Button>
-      </aside>
-
-      <header className="sticky top-0 z-50 flex h-16 items-center gap-4 border-b border-border/70 bg-background/88 px-4 backdrop-blur-xl lg:hidden">
-        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-          <SheetTrigger asChild>
-            <Button variant="ghost" size="icon">
-              <Menu className="h-5 w-5" />
-            </Button>
-          </SheetTrigger>
-          <SheetContent side="left" className="w-64 p-0">
-            {sidebar}
-          </SheetContent>
-        </Sheet>
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full border border-primary/30 bg-primary/10">
-            <CircleGauge className="h-5 w-5 text-primary" />
-          </div>
-          <span className="font-semibold">{navTitle}</span>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={toggleTheme}>
-            {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-          </Button>
-          <UserMenu
-            initials={initials}
-            loading={loading}
-            name={profile?.name ?? session?.user?.name ?? "FitCoach user"}
-            subtitle={demoMode ? "demo mode" : profile?.experience ?? "beginner"}
-            demoMode={demoMode}
-            onLogout={handleLogout}
-          />
-        </div>
-      </header>
-
-      <header
-        className={cn(
-          "sticky top-0 z-30 hidden h-16 items-center justify-between border-b border-border/70 bg-background/82 px-6 backdrop-blur-xl lg:flex",
-          sidebarCollapsed ? "pl-[calc(72px+1.5rem)]" : "pl-[calc(16rem+1.5rem)]",
-        )}
-      >
-        <div>
-          <h2 className="text-lg font-black uppercase tracking-[0.12em]">{navTitle}</h2>
-          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-            {profile?.goals?.length ? `Current focus: ${profile.goals[0].replace(/_/g, " ")}` : "Complete your profile to personalize coaching"}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-4">
-          {profile ? (
-            <div className="hidden items-center gap-4 text-sm text-muted-foreground md:flex">
-              <div className="flex items-center gap-1.5">
-                <Target className="h-4 w-4 text-primary" />
-                <span>{profile.goals[0]?.replace(/_/g, " ") || "Set a goal"}</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Zap className="h-4 w-4 text-accent" />
-                <span>{profile.workoutFrequency ?? 0} days/week target</span>
-              </div>
-            </div>
-          ) : null}
-
-          <Button variant="ghost" size="icon" onClick={toggleTheme}>
-            {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-          </Button>
-
-          <UserMenu
-            initials={initials}
-            loading={loading}
-            name={profile?.name ?? session?.user?.name ?? "FitCoach user"}
-            subtitle={demoMode ? "demo mode" : profile?.experience ?? "beginner"}
-            demoMode={demoMode}
-            onLogout={handleLogout}
-          />
-        </div>
-      </header>
-
-      <main className={cn("min-h-[calc(100vh-4rem)] transition-all duration-300", sidebarCollapsed ? "lg:pl-[72px]" : "lg:pl-64")}>
-        {children}
-      </main>
-    </div>
-  );
-}
-
-function UserMenu({
-  initials,
-  loading,
-  name,
-  subtitle,
-  demoMode,
-  onLogout,
-}: {
-  initials: string;
-  loading: boolean;
-  name: string;
-  subtitle: string;
-  demoMode: boolean;
-  onLogout: () => void | Promise<void>;
-}) {
-  return (
+  const name = profile?.name ?? session?.user?.name ?? "Your account";
+  const initials = name
+    .split(" ")
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const account = (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="relative h-9 w-9 rounded-full">
-          <Avatar className="h-9 w-9 ring-2 ring-primary/20">
-            <AvatarImage alt={name} />
-            <AvatarFallback className="bg-primary text-primary-foreground text-sm font-black">
+        <Button variant="ghost" size="icon" aria-label="Open account menu">
+          <Avatar className="size-8">
+            <AvatarFallback className="bg-secondary text-foreground text-xs">
               {loading ? "…" : initials}
             </AvatarFallback>
           </Avatar>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-56" align="end">
+      <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>
-          <div className="flex flex-col gap-1">
-            <p className="text-sm font-medium leading-none">{name}</p>
-            <p className="text-xs leading-none text-muted-foreground capitalize">{subtitle}</p>
-            {demoMode ? <p className="text-[11px] leading-none text-amber-500">Testing mode with local demo session</p> : null}
-          </div>
+          <p>{name}</p>
+          <p className="mt-1 text-xs font-normal text-muted-foreground">
+            {demoMode ? "Demo session" : "Your practice, your pace"}
+          </p>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
           <Link href="/settings">
-            <User className="mr-2 h-4 w-4" />
-            Profile
+            <User aria-hidden="true" />
+            Account & settings
           </Link>
         </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link href="/settings">
-            <Settings className="mr-2 h-4 w-4" />
-            Settings
-          </Link>
-        </DropdownMenuItem>
+        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+          Appearance
+        </DropdownMenuLabel>
+        {(["light", "dark", "system"] as const).map((theme) => (
+          <DropdownMenuItem
+            key={theme}
+            onSelect={() => void setAppearance(theme)}
+          >
+            {theme === "system"
+              ? "Use device setting"
+              : `${theme[0].toUpperCase()}${theme.slice(1)} studio`}
+          </DropdownMenuItem>
+        ))}
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="text-destructive" onClick={onLogout}>
-          <LogOut className="mr-2 h-4 w-4" />
-          Log out
+        <DropdownMenuItem onSelect={handleLogout}>
+          <LogOut aria-hidden="true" />
+          Sign out
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+
+  return (
+    <div className="performance-shell workspace min-h-screen bg-background">
+      <aside
+        aria-label="Sidebar"
+        className={cn(
+          "app-sidebar fixed inset-y-0 left-0 z-40 hidden lg:block",
+          sidebarCollapsed ? "w-[76px]" : "w-60",
+        )}
+      >
+        {sidebar(sidebarCollapsed)}
+      </aside>
+      <div className={cn(sidebarCollapsed ? "lg:pl-[76px]" : "lg:pl-60")}>
+        <header className="app-header sticky top-0 z-30 flex min-h-20 items-center gap-4 px-4 py-3 md:px-8">
+          <div className="lg:hidden">
+            <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+              <SheetTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Open navigation"
+                >
+                  <Menu aria-hidden="true" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="app-sidebar w-64 p-0">
+                <SheetTitle className="sr-only">FitCoach navigation</SheetTitle>
+                {sidebar()}
+              </SheetContent>
+            </Sheet>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleSidebar}
+            aria-label={
+              sidebarCollapsed ? "Expand navigation" : "Collapse navigation"
+            }
+            aria-expanded={!sidebarCollapsed}
+            className="hidden lg:inline-flex"
+          >
+            {sidebarCollapsed ? (
+              <PanelLeftOpen aria-hidden="true" />
+            ) : (
+              <PanelLeftClose aria-hidden="true" />
+            )}
+          </Button>
+          <div className="min-w-0">
+            <p className="app-header-title">{navTitle}</p>
+            <p className="app-header-context hidden sm:block">
+              {profile?.goals?.length
+                ? `Your focus: ${profile.goals[0].replace(/_/g, " ")}`
+                : "A little practice. A little progress."}
+            </p>
+          </div>
+          <div className="ml-auto flex items-center gap-4">
+            <span className="hidden text-xs text-muted-foreground md:block">
+              {demoMode
+                ? "Sample data"
+                : profile?.name
+                  ? `Hello, ${profile.name.split(" ")[0]}`
+                  : "Welcome to your practice"}
+            </span>
+            {account}
+          </div>
+        </header>
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="min-h-[calc(100svh-5rem)] outline-none"
+        >
+          {children}
+        </main>
+      </div>
+    </div>
   );
 }

@@ -14,11 +14,15 @@ export function createPoseTrackingEngine(options: { onTelemetry?: (event: Sessio
   let previousTimestamp = 0;
   let quality: "full" | "lite" = "full";
   let slowFrames = 0;
+  let warmingUp = true;
   function request(message: Omit<PoseWorkerRequest, "id">, transfer: Transferable[] = []): Promise<PoseWorkerReply> {
     if (!worker || pending) return Promise.reject(new Error("Pose worker unavailable"));
     const requestId = ++id;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { pending = null; worker?.terminate(); worker = null; initialized = null; reject(new Error("Pose model timed out. Restart the camera to retry.")); }, message.type === "init" ? 30000 : 5000);
+      // The first detect call compiles WASM/XNNPACK kernels. Its cold cost is
+      // model startup, not the steady-state frame latency budget.
+      if (message.type === "init") warmingUp = true;
+      const timer = setTimeout(() => { pending = null; worker?.terminate(); worker = null; initialized = null; reject(new Error("Pose model timed out. Restart the camera to retry.")); }, message.type === "init" || warmingUp ? 30000 : 5000);
       pending = { id: requestId, resolve, reject, timer };
       try { worker!.postMessage({ ...message, id: requestId }, transfer); }
       catch { clearTimeout(timer); pending = null; reject(new Error("Unable to send camera frame")); }
@@ -27,11 +31,12 @@ export function createPoseTrackingEngine(options: { onTelemetry?: (event: Sessio
   function createWorker() {
     // Classic worker lets the MediaPipe WASM loader use importScripts.
     const created = new Worker(new URL("/mediapipe/pose-worker.js", window.location.origin));
+    warmingUp = true;
     worker = created;
     created.onmessage = ({ data }: MessageEvent<PoseWorkerReply>) => {
       if (worker !== created || !pending || pending.id !== data.id) return;
       const current = pending; pending = null; clearTimeout(current.timer);
-      if (data.error) current.reject(new Error(data.error)); else current.resolve(data);
+      if (data.error) current.reject(new Error(data.error)); else { if (Array.isArray(data.landmarks)) warmingUp = false; current.resolve(data); }
     };
     created.onerror = () => { if (worker !== created) return; if (pending) { clearTimeout(pending.timer); pending.reject(new Error("Pose worker failed. Restart the camera to retry.")); pending = null; } worker?.terminate(); worker = null; initialized = null; };
   }

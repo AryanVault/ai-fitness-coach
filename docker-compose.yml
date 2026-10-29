@@ -1,3 +1,7 @@
+# Local development: docker compose up --build
+# Production: docker compose --profile production up --build app-production
+# Migration: docker compose --profile tools run --rm migrate
+# Public build values and private runtime values come from the operator environment.
 services:
   db:
     image: postgres:16-alpine
@@ -6,7 +10,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - fitcoach-postgres:/var/lib/postgresql/data
     healthcheck:
@@ -16,8 +20,10 @@ services:
       retries: 12
 
   app:
-    build: .
-    command: sh -c "npm run db:migrate && npm start"
+    build:
+      context: .
+      target: development
+    command: sh -c "npm run db:migrate && npm run db:seed && npm run dev -- --hostname 0.0.0.0"
     depends_on:
       db:
         condition: service_healthy
@@ -25,19 +31,72 @@ services:
       NODE_ENV: development
       DATABASE_URL: postgres://postgres:postgres@db:5432/fitcoach
       DATABASE_SSL: "false"
-      BETTER_AUTH_SECRET: replace-with-a-long-random-secret-at-least-32-chars
+      BETTER_AUTH_SECRET: local-development-only-secret-at-least-32-characters
       BETTER_AUTH_URL: http://localhost:3000
       NEXT_PUBLIC_APP_URL: http://localhost:3000
       TRUSTED_ORIGINS: http://localhost:3000
       ENABLE_DEMO_MODE: "false"
       NEXT_PUBLIC_ENABLE_DEMO_MODE: "false"
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 60s
+
+  app-production:
+    profiles: ["production"]
+    build:
+      context: .
+      target: runner
+      args:
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-}
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_SSL: ${DATABASE_SSL:-true}
+      DATABASE_SSL_CA: ${DATABASE_SSL_CA:-}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
+      UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
+      UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
+      CRON_SECRET: ${CRON_SECRET:-}
+      AUTH_MIGRATION_INVENTORIED: ${AUTH_MIGRATION_INVENTORIED:-false}
+      BETA_SIGNUPS_OPEN: ${BETA_SIGNUPS_OPEN:-false}
+      BETA_ACCOUNT_LIMIT: ${BETA_ACCOUNT_LIMIT:-50}
+      ENABLE_LEGACY_AUTH: ${ENABLE_LEGACY_AUTH:-false}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      AI_DAILY_TOKEN_BUDGET: ${AI_DAILY_TOKEN_BUDGET:-}
+      ENABLE_DEMO_MODE: "false"
+      NEXT_PUBLIC_ENABLE_DEMO_MODE: "false"
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  migrate:
+    profiles: ["tools"]
+    build:
+      context: .
+      target: migrations
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_SSL: ${DATABASE_SSL:-true}
 
 volumes:
   fitcoach-postgres:

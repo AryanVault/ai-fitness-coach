@@ -1,27 +1,43 @@
-"use client";
-
 import Link from "next/link";
 import { SignIn } from "@clerk/nextjs";
-import { Card, CardContent } from "@/components/ui/card";
+import { safeNextPath } from "@/lib/auth/navigation";
+import { BrandMark } from "@/components/brand/BrandMark";
 
-export default function ClerkSignInPage() {
-  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
-    return (
-      <div className="performance-shell flex min-h-screen items-center justify-center p-4">
-        <Card className="max-w-md">
-          <CardContent className="space-y-3 pt-6">
-            <h1 className="text-2xl font-black uppercase">Clerk is not configured</h1>
-            <p className="text-sm text-muted-foreground">Add Clerk keys to `.env.local`, or use the existing email/password login.</p>
-            <Link href="/login" className="text-primary">Go to login</Link>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+export const metadata = { title: "Sign in" };
 
+export default async function AuthPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string | string[] }>;
+}) {
+  const params = await searchParams;
+  const next = safeNextPath(
+    typeof params.next === "string" ? params.next : null,
+    "/dashboard",
+  );
+  const alternate = `/sign-up?next=${encodeURIComponent(next)}`;
   return (
-    <div className="performance-shell flex min-h-screen items-center justify-center p-4">
-      <SignIn signUpUrl="/sign-up" fallbackRedirectUrl="/dashboard" />
+    <div className="flex min-h-screen flex-col items-center justify-center gap-8 px-4 py-12">
+      <Link href="/" className="studio-brand" aria-label="FitCoach home">
+        <BrandMark />
+        FitCoach
+      </Link>
+      {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? (
+        <SignIn signUpUrl={alternate} forceRedirectUrl={next} />
+      ) : (
+        <div className="max-w-sm space-y-4 text-center">
+          <h1 className="text-2xl">Welcome back.</h1>
+          <p className="text-sm text-muted-foreground">
+            Continue to your account.
+          </p>
+          <Link
+            className="studio-action"
+            href={`/login?next=${encodeURIComponent(next)}`}
+          >
+            Continue
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

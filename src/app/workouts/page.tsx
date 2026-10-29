@@ -1,394 +1,184 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Dumbbell,
-  Heart,
-  Flame,
-  Wind,
-  Activity,
-  Music,
-  Play,
-  Clock,
-  Target,
-  Search,
-  Filter,
-  Sparkles,
-  ChevronRight,
-  Zap,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Label } from "@/components/ui/label";
+import { requestJson } from "@/lib/client/request";
+import type { ExerciseId } from "@/lib/pose/types";
 
-interface Exercise {
+type CatalogExercise = {
+  id: string;
+  name: string;
+  category?: string;
+  difficulty?: string;
+  description?: string;
+  instructions?: string;
+  muscleGroup?: string;
+  equipment?: string;
+};
+
+type Movement = {
   id: string;
   name: string;
   category: string;
   difficulty: string;
   description: string;
-  calories: number;
-  muscleGroup: string;
-  equipment: string;
-}
-
-interface DanceStyle {
-  id: string;
-  name: string;
-  description: string;
-  difficulty: string;
-  intensity: string;
-  caloriesPerHour: number;
-}
-
-const categoryData = [
-  { id: "all", label: "All Workouts", icon: Activity, color: "from-violet-500 to-purple-500" },
-  { id: "strength", label: "Strength", icon: Dumbbell, color: "from-blue-500 to-cyan-500" },
-  { id: "cardio", label: "Cardio", icon: Heart, color: "from-rose-500 to-pink-500" },
-  { id: "hiit", label: "HIIT", icon: Flame, color: "from-orange-500 to-amber-500" },
-  { id: "yoga", label: "Yoga", icon: Wind, color: "from-emerald-500 to-teal-500" },
-  { id: "dance", label: "Dance", icon: Music, color: "from-pink-500 to-rose-500" },
-];
-
-const featuredWorkouts = [
-  { name: "Morning Energy Boost", duration: "15 min", type: "HIIT", calories: 180, image: "🌅", color: "from-orange-500 to-amber-500" },
-  { name: "Full Body Strength", duration: "45 min", type: "Strength", calories: 350, image: "💪", color: "from-blue-500 to-cyan-500" },
-  { name: "Dance Cardio Party", duration: "30 min", type: "Dance", calories: 280, image: "💃", color: "from-pink-500 to-rose-500" },
-  { name: "Yoga for Recovery", duration: "25 min", type: "Yoga", calories: 120, image: "🧘", color: "from-emerald-500 to-teal-500" },
-];
-
-const categoryColors: Record<string, string> = {
-  strength: "bg-blue-500/10 text-blue-500 border-blue-500/20",
-  cardio: "bg-rose-500/10 text-rose-500 border-rose-500/20",
-  hiit: "bg-orange-500/10 text-orange-500 border-orange-500/20",
-  yoga: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
-  flexibility: "bg-teal-500/10 text-teal-500 border-teal-500/20",
-  dance: "bg-pink-500/10 text-pink-500 border-pink-500/20",
+  details: string[];
+  href: string;
+  action: string;
 };
 
-const categoryIcons: Record<string, any> = {
-  strength: Dumbbell,
-  cardio: Heart,
-  hiit: Flame,
-  yoga: Wind,
-  flexibility: Activity,
-  dance: Music,
+// Canonical IDs are the workout choices exposed by PoseAnalyzer. Catalog IDs
+// are database keys; never pass those through as if they were analyzer choices.
+const supportedNames: Record<string, Exclude<ExerciseId, "dance_basic">> = {
+  squat: "squat", squats: "squat", bodyweight_squat: "squat", bodyweight_squats: "squat",
+  pushup: "pushup", pushups: "pushup", push_up: "pushup", push_ups: "pushup",
+  lunge: "lunge", lunges: "lunge", bicep_curl: "bicep_curl", bicep_curls: "bicep_curl",
+  biceps_curl: "bicep_curl", biceps_curls: "bicep_curl",
+  jumping_jack: "jumping_jack", jumping_jacks: "jumping_jack",
+  plank: "plank", forearm_plank: "plank", warrior: "warrior", warrior_ii: "warrior", warrior_2: "warrior",
+};
+
+function normalize(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
+
+function readable(value: string) {
+  return value.replace(/[_-]+/g, " ");
+}
+
+function toMovement(exercise: CatalogExercise): Movement | null {
+  const id = normalize(exercise.id);
+  const name = normalize(exercise.name);
+  const canonicalId = Object.hasOwn(supportedNames, id) ? supportedNames[id]
+    : Object.hasOwn(supportedNames, name) ? supportedNames[name] : null;
+  if (!canonicalId) return null;
+  return {
+    id: exercise.id,
+    name: exercise.name,
+    category: exercise.category?.trim().toLowerCase() || "other",
+    difficulty: exercise.difficulty ? readable(exercise.difficulty) : "Level not specified",
+    description: exercise.description || exercise.instructions || "Choose this movement in the camera coach to review setup guidance.",
+    details: [exercise.muscleGroup, exercise.equipment].filter((value): value is string => Boolean(value)).map(readable),
+    href: `/coach/workout?exercise=${canonicalId}`,
+    action: `Practice ${exercise.name}`,
+  };
+}
+
+// This course is the bundled starter-groove-pack used by DanceStudio. Other
+// catalog dance styles do not have corresponding training routines yet.
+const starterCourse: Movement = {
+  id: "starter-groove-pack",
+  name: "Hip-Hop Starter Groove",
+  category: "dance",
+  difficulty: "beginner",
+  description: "Practice the starter course: wide arm hits, soft-knee groove, torso control and phrase timing.",
+  details: ["Guided starter course"],
+  href: "/coach/dance",
+  action: "Open Hip-Hop Starter Groove",
 };
 
 export default function WorkoutsPage() {
-  const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [danceStyles, setDanceStyles] = useState<DanceStyle[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [activeCategory, setActiveCategory] = useState("all");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [exercises, setExercises] = useState<Movement[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [category, setCategory] = useState("all");
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
-    loadExercises();
-    loadDanceStyles();
-  }, []);
-
-  const loadExercises = async () => {
-    try {
-      const response = await fetch("/api/exercises");
-      const data = await response.json();
-      if (data.exercises) {
-        setExercises(data.exercises);
+    let cancelled = false;
+    const controller = new AbortController();
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await requestJson<{ exercises: CatalogExercise[] }>("/api/exercises", {
+          credentials: "include", cache: "no-store", signal: controller.signal,
+        });
+        if (!Array.isArray(data?.exercises)) throw new Error("Invalid movement catalog");
+        const movements = data.exercises.filter(exercise =>
+          exercise && typeof exercise.id === "string" && typeof exercise.name === "string",
+        ).map(toMovement).filter((movement): movement is Movement => movement !== null);
+        if (!cancelled) setExercises(movements);
+      } catch {
+        if (!cancelled) setError("Could not load the movement catalog. Retry to see available camera exercises.");
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    } catch (error) {
-      console.error("Failed to load exercises:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    };
+    void load();
+    return () => { cancelled = true; controller.abort(); };
+  }, [attempt]);
 
-  const loadDanceStyles = async () => {
-    try {
-      const response = await fetch("/api/exercises?type=dance");
-      const data = await response.json();
-      if (data.danceStyles) {
-        setDanceStyles(data.danceStyles);
-      }
-    } catch (error) {
-      console.error("Failed to load dance styles:", error);
-    }
-  };
-
-  const filteredExercises =
-    activeCategory === "all"
-      ? exercises
-      : activeCategory === "dance"
-      ? []
-      : exercises.filter((ex) => ex.category === activeCategory);
-
-  const searchedExercises = filteredExercises.filter(
-    (ex) =>
-      ex.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ex.muscleGroup?.toLowerCase().includes(searchQuery.toLowerCase())
+  const movements = [...exercises, starterCourse];
+  const categories = Array.from(new Set(movements.map(movement => movement.category))).sort();
+  const search = query.trim().toLowerCase();
+  const filtered = movements.filter(movement =>
+    (category === "all" || movement.category === category) &&
+    [movement.name, movement.category, movement.description, ...movement.details].some(value => value.toLowerCase().includes(search)),
   );
+  const hasFilters = category !== "all" || query.length > 0;
 
   return (
-    <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col md:flex-row md:items-center justify-between gap-4"
-      >
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold">Workout Library</h1>
-          <p className="text-muted-foreground mt-1">
-            Discover exercises and workouts for every goal
-          </p>
-        </div>
-        <Link href="/coach/chat">
-          <Button className="gap-2 bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600">
-            <Sparkles className="h-4 w-4" />
-            Get AI Recommendation
-          </Button>
+    <div className="mx-auto max-w-6xl space-y-8 p-4 md:p-6 lg:p-8">
+      <header className="space-y-4">
+        <h1 className="text-4xl leading-tight md:text-5xl">Movement library</h1>
+        <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+          Choose a camera-supported movement or the hip-hop starter course. Each session begins with setup and calibration.
+        </p>
+        <Link href="/coach/chat" className="inline-flex min-h-10 items-center gap-2 text-sm font-medium text-foreground hover:text-primary">
+          Ask your coach for guidance <span aria-hidden="true">↗</span>
         </Link>
-      </motion.div>
+      </header>
 
-      {/* Search */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-        className="relative"
-      >
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search exercises, muscle groups..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-10"
-        />
-      </motion.div>
-
-      {/* Featured Workouts */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold">Featured Workouts</h2>
-          <Button variant="ghost" size="sm" className="gap-1">
-            View All <ChevronRight className="h-4 w-4" />
-          </Button>
+      <section aria-label="Find a movement" className="grid items-end gap-4 rounded-xl bg-card p-5 sm:grid-cols-[minmax(0,1fr)_minmax(10rem,0.45fr)_auto] md:p-6">
+        <div className="space-y-2">
+          <Label htmlFor="movement-search">Search movements</Label>
+          <Input id="movement-search" type="search" value={query} placeholder="Name, muscle group or technique" onChange={event => setQuery(event.target.value)} />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {featuredWorkouts.map((workout, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 + i * 0.1 }}
-            >
-              <Link href="/coach/workout">
-                <Card className="overflow-hidden card-hover cursor-pointer group">
-                  <div className={cn("h-32 bg-gradient-to-br flex items-center justify-center", workout.color)}>
-                    <span className="text-5xl group-hover:scale-110 transition-transform">{workout.image}</span>
-                  </div>
-                  <CardContent className="pt-4">
-                    <h3 className="font-semibold truncate">{workout.name}</h3>
-                    <div className="flex items-center gap-3 text-sm text-muted-foreground mt-2">
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" /> {workout.duration}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Flame className="h-3 w-3" /> {workout.calories} cal
-                      </span>
+        <div className="space-y-2">
+          <Label htmlFor="movement-category">Movement category</Label>
+          <select id="movement-category" value={category} onChange={event => setCategory(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm capitalize focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+            <option value="all">All movements</option>
+            {categories.map(value => <option key={value} value={value}>{readable(value).replace(/^./, letter => letter.toUpperCase())}</option>)}
+          </select>
+        </div>
+        <Button variant="ghost" disabled={!hasFilters} onClick={() => { setQuery(""); setCategory("all"); }}>Clear filters</Button>
+      </section>
+
+      {loading ? <p role="status" className="text-sm text-muted-foreground">Loading movement catalog...</p> : error ? (
+        <div role="alert" className="space-y-3 rounded-xl bg-muted p-5">
+          <p className="text-sm">{error}</p>
+          <Button onClick={() => setAttempt(value => value + 1)}>Retry catalog</Button>
+        </div>
+      ) : (
+        <section aria-label="Available movements" className="space-y-4">
+          <p role="status" className="text-sm text-muted-foreground">{filtered.length} {filtered.length === 1 ? "movement" : "movements"} available</p>
+          {filtered.length ? (
+            <ul className="space-y-3">
+              {filtered.map(movement => (
+                <li key={movement.id} className="grid items-center gap-5 rounded-xl bg-card p-5 sm:grid-cols-[minmax(0,1fr)_auto] md:p-6">
+                  <div className="min-w-0 space-y-3">
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                      <span className="capitalize">{readable(movement.category)}</span>
+                      <span className="capitalize">{movement.difficulty}</span>
                     </div>
-                    <Badge variant="secondary" className="mt-2">{workout.type}</Badge>
-                  </CardContent>
-                </Card>
-              </Link>
-            </motion.div>
-          ))}
-        </div>
-      </motion.div>
-
-      {/* Category Tabs */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
-      >
-        <Tabs value={activeCategory} onValueChange={setActiveCategory}>
-          <TabsList className="flex flex-wrap h-auto gap-2 bg-transparent p-0">
-            {categoryData.map((cat) => {
-              const Icon = cat.icon;
-              return (
-                <TabsTrigger
-                  key={cat.id}
-                  value={cat.id}
-                  className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-xl border data-[state=active]:bg-gradient-to-r data-[state=active]:text-white data-[state=active]:border-transparent",
-                    `data-[state=active]:${cat.color}`
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                  <span className="hidden sm:inline">{cat.label}</span>
-                </TabsTrigger>
-              );
-            })}
-          </TabsList>
-
-          <div className="mt-6">
-            {isLoading ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {[1, 2, 3, 4, 5, 6].map((i) => (
-                  <Card key={i} className="animate-pulse">
-                    <CardHeader>
-                      <div className="h-6 bg-muted rounded w-3/4" />
-                      <div className="h-4 bg-muted rounded w-1/2 mt-2" />
-                    </CardHeader>
-                    <CardContent>
-                      <div className="h-20 bg-muted rounded" />
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            ) : activeCategory === "dance" ? (
-              <DanceGrid danceStyles={danceStyles} />
-            ) : (
-              <WorkoutGrid exercises={searchedExercises} />
-            )}
-          </div>
-        </Tabs>
-      </motion.div>
-    </div>
-  );
-}
-
-function WorkoutGrid({ exercises }: { exercises: Exercise[] }) {
-  if (exercises.length === 0) {
-    return (
-      <div className="text-center py-12">
-        <Dumbbell className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-        <h3 className="font-semibold mb-2">No exercises found</h3>
-        <p className="text-sm text-muted-foreground">Try adjusting your search or category filter</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      {exercises.map((exercise, i) => {
-        const Icon = categoryIcons[exercise.category] || Activity;
-        return (
-          <motion.div
-            key={exercise.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.05 }}
-          >
-            <Card className="h-full card-hover">
-              <CardHeader>
-                <div className="flex items-start justify-between mb-2">
-                  <div className={cn("p-2 rounded-lg border", categoryColors[exercise.category])}>
-                    <Icon className="h-5 w-5" />
+                    <h2 className="text-2xl leading-tight">{movement.name}</h2>
+                    <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{movement.description}</p>
+                    {movement.details.length ? <p className="text-sm capitalize text-muted-foreground">{movement.details.join(" · ")}</p> : null}
                   </div>
-                  <Badge variant="outline" className="capitalize">{exercise.difficulty}</Badge>
-                </div>
-                <CardTitle className="text-xl">{exercise.name}</CardTitle>
-                <CardDescription className="line-clamp-2">{exercise.description}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-1 text-muted-foreground">
-                    <Flame className="h-4 w-4 text-orange-500" />
-                    <span>{exercise.calories} cal/min</span>
-                  </div>
-                  <div className="flex items-center gap-1 text-muted-foreground">
-                    <Target className="h-4 w-4 text-primary" />
-                    <span className="capitalize">{exercise.muscleGroup?.replace("_", " ")}</span>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Link href={`/coach/workout?exercise=${exercise.id}`} className="flex-1">
-                    <Button className="w-full gap-2" variant="outline">
-                      <Play className="h-4 w-4" />
-                      Start
-                    </Button>
-                  </Link>
-                  <Button variant="ghost" size="icon">
-                    <Zap className="h-4 w-4" />
+                  <Button asChild variant="ghost" className="justify-start gap-3 sm:justify-center">
+                    <Link href={movement.href} aria-label={movement.action}>{movement.href === "/coach/dance" ? "Open course" : "Practice"}<span aria-hidden="true">↗</span></Link>
                   </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        );
-      })}
-    </div>
-  );
-}
-
-function DanceGrid({ danceStyles }: { danceStyles: DanceStyle[] }) {
-  if (danceStyles.length === 0) {
-    return (
-      <div className="text-center py-12">
-        <Music className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-        <h3 className="font-semibold mb-2">No dance styles found</h3>
-        <p className="text-sm text-muted-foreground">Check back soon for more dance workouts!</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      {danceStyles.map((style, i) => (
-        <motion.div
-          key={style.id}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: i * 0.05 }}
-        >
-          <Card className="h-full card-hover overflow-hidden">
-            <div className="h-32 bg-gradient-to-br from-pink-500 to-rose-500 flex items-center justify-center">
-              <Music className="h-12 w-12 text-white/80" />
-            </div>
-            <CardHeader>
-              <div className="flex items-start justify-between">
-                <CardTitle className="text-xl">{style.name}</CardTitle>
-                <Badge variant="outline" className="capitalize">{style.difficulty}</Badge>
-              </div>
-              <CardDescription className="line-clamp-2">{style.description}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-1 text-muted-foreground">
-                  <Flame className="h-4 w-4 text-orange-500" />
-                  <span>{style.caloriesPerHour} cal/hr</span>
-                </div>
-                <Badge
-                  className={cn(
-                    "capitalize",
-                    style.intensity === "high"
-                      ? "bg-red-500"
-                      : style.intensity === "moderate"
-                      ? "bg-yellow-500"
-                      : "bg-green-500"
-                  )}
-                >
-                  {style.intensity}
-                </Badge>
-              </div>
-              <Link href={`/coach/dance?style=${style.name.toLowerCase().replace(" ", "-")}`}>
-                <Button className="w-full gap-2 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600">
-                  <Music className="h-4 w-4" />
-                  Start Dancing
-                </Button>
-              </Link>
-            </CardContent>
-          </Card>
-        </motion.div>
-      ))}
+                </li>
+              ))}
+            </ul>
+          ) : <p className="py-8 text-sm text-muted-foreground">No movements match these filters.</p>}
+        </section>
+      )}
     </div>
   );
 }

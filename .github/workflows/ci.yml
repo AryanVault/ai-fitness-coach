@@ -22,11 +22,12 @@ jobs:
       DATABASE_URL: postgres://postgres:test-only@localhost:5432/fitcoach_test
       TEST_DATABASE_URL: postgres://postgres:test-only@localhost:5432/fitcoach_test
       BETTER_AUTH_SECRET: ci-local-testing-secret-at-least-32-characters
-      BETTER_AUTH_URL: http://127.0.0.1:3100
-      NEXT_PUBLIC_APP_URL: http://127.0.0.1:3100
-      TRUSTED_ORIGINS: http://127.0.0.1:3100
+      BETTER_AUTH_URL: http://127.0.0.1:3117
+      NEXT_PUBLIC_APP_URL: http://127.0.0.1:3117
+      TRUSTED_ORIGINS: http://127.0.0.1:3117
       ENABLE_DEMO_MODE: "false"
       NEXT_PUBLIC_ENABLE_DEMO_MODE: "false"
+      PLAYWRIGHT_PORT: "3117"
       E2E_REAL_DATABASE: "true"
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +38,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: npm install --global npm@10.9.9 --ignore-scripts
       - run: npm ci --legacy-peer-deps
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test

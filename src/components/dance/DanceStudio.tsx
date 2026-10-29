@@ -157,7 +157,7 @@ export default function DanceStudio() {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,color-mix(in_oklch,var(--primary)_18%,transparent),transparent_34rem),linear-gradient(180deg,color-mix(in_oklch,var(--background)_88%,black),var(--background)_46rem)]">
       <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6 lg:p-8">
-        <motion.section initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
+        <motion.section initial={false} animate={{ opacity: 1, y: 0 }} className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="rounded-lg border bg-card/90 p-5 shadow-sm">
             <div className="flex flex-wrap items-center gap-2">
               <Badge className="gap-1">
@@ -218,7 +218,7 @@ export default function DanceStudio() {
             <Card className="border-accent/20 bg-card/90">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Medal className="h-5 w-5 text-accent" />
+                  <Medal className="h-5 w-5 text-primary" />
                   Class Scores
                 </CardTitle>
                 <CardDescription>Use the leaderboard as a realistic benchmark for the viva/demo.</CardDescription>
@@ -226,7 +226,7 @@ export default function DanceStudio() {
               <CardContent className="space-y-3">
                 {leaderboard.slice(0, 3).map((athlete, index) => (
                   <div key={athlete.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-lg border bg-background/45 p-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-accent/15 text-xs font-black text-accent">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-accent/15 text-xs font-black text-primary">
                       {index + 1}
                     </div>
                     <div className="min-w-0">
@@ -292,7 +292,7 @@ export default function DanceStudio() {
           <Card className="border-accent/20 bg-card/95">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Radio className="h-5 w-5 text-accent" />
+                <Radio className="h-5 w-5 text-primary" />
                 Audio Sync
               </CardTitle>
               <CardDescription>Count-in and loop controls for phrase practice.</CardDescription>
@@ -383,7 +383,7 @@ export default function DanceStudio() {
           <Card className="overflow-hidden border-accent/20 bg-card/95">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Sparkles className="h-5 w-5 text-accent" />
+                <Sparkles className="h-5 w-5 text-primary" />
                 Active Step Coach
               </CardTitle>
               <CardDescription>Count, mistake, correction, and target metrics for the selected phrase.</CardDescription>
@@ -431,7 +431,7 @@ export default function DanceStudio() {
                       <img src={routine?.thumbnailUrl ?? "/routines/starter-groove-thumbnail.svg"} alt={`${currentStep.title} reference pose`} className="h-40 w-full object-cover" />
                       <div className="flex items-center justify-between gap-3 p-3">
                         <div className="flex items-center gap-2 text-sm font-medium">
-                          <Video className="h-4 w-4 text-accent" />
+                          <Video className="h-4 w-4 text-primary" />
                           Reference media
                         </div>
                         <Badge variant="outline">Skeleton preview</Badge>
@@ -485,7 +485,7 @@ export default function DanceStudio() {
           <Card className="border-accent/20 bg-card/95">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <History className="h-5 w-5 text-accent" />
+                <History className="h-5 w-5 text-primary" />
                 Attempt History
               </CardTitle>
               <CardDescription>Saved practice and full-routine attempts for this course.</CardDescription>

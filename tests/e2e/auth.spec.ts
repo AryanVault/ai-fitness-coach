@@ -28,3 +28,11 @@ test("production never authenticates a demo cookie",async({request})=>{
  expect([401,503]).toContain(response.status());
  expect(await response.json()).not.toHaveProperty("user");
 });
+
+test("production responses prevent framing without exposing framework headers", async ({ request }) => {
+  test.skip(!process.env.PLAYWRIGHT_USE_BUILD, "Production response configuration");
+  const response = await request.get("/");
+  expect(response.headers()["x-frame-options"]).toBe("DENY");
+  expect(response.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+  expect(response.headers()).not.toHaveProperty("x-powered-by");
+});

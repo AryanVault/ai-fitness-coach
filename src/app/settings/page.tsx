@@ -222,7 +222,7 @@ export default function SettingsPage() {
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-4xl mx-auto space-y-6">
       <motion.div
-        initial={{ opacity: 0, y: -20 }}
+        initial={false}
         animate={{ opacity: 1, y: 0 }}
       >
         <h1 className="text-2xl md:text-3xl font-bold">Settings</h1>
@@ -252,7 +252,7 @@ export default function SettingsPage() {
         {/* Profile Tab */}
         <TabsContent value="profile" className="space-y-6">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={false}
             animate={{ opacity: 1, y: 0 }}
           >
             <Card>
@@ -265,7 +265,7 @@ export default function SettingsPage() {
                 <div className="flex items-center gap-4">
                   <Avatar className="h-20 w-20">
                     <AvatarImage src="" alt={name} />
-                    <AvatarFallback className="bg-gradient-to-br from-orange-500 to-rose-500 text-white text-2xl">
+                    <AvatarFallback className="bg-secondary text-foreground text-2xl">
                       {initials}
                     </AvatarFallback>
                   </Avatar>
@@ -325,7 +325,7 @@ export default function SettingsPage() {
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={false}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
           >
@@ -377,7 +377,7 @@ export default function SettingsPage() {
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={false}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.15 }}
           >
@@ -445,7 +445,7 @@ export default function SettingsPage() {
         {/* Fitness Tab */}
         <TabsContent value="fitness" className="space-y-6">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={false}
             animate={{ opacity: 1, y: 0 }}
           >
             <Card>
@@ -476,7 +476,7 @@ export default function SettingsPage() {
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={false}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
           >
@@ -509,7 +509,7 @@ export default function SettingsPage() {
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={false}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
           >
@@ -558,7 +558,7 @@ export default function SettingsPage() {
         {/* Notifications Tab */}
         <TabsContent value="notifications" className="space-y-6">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={false}
             animate={{ opacity: 1, y: 0 }}
           >
             <Card>
@@ -585,7 +585,7 @@ export default function SettingsPage() {
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={false}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
           >
@@ -609,7 +609,7 @@ export default function SettingsPage() {
         {/* Appearance Tab */}
         <TabsContent value="appearance" className="space-y-6">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={false}
             animate={{ opacity: 1, y: 0 }}
           >
             <Card>
@@ -646,7 +646,7 @@ export default function SettingsPage() {
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={false}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
           >

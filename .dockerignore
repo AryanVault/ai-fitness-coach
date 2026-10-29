@@ -9,3 +9,9 @@ playwright-report
 test-results
 .git
 .DS_Store
+backups
+artifacts
+*.log
+.codegraph
+.playwright-mcp
+local.db*

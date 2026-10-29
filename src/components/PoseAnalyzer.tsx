@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { COACH_EXERCISES, selectCoachExercise } from "@/lib/pose/exercise-selection";
 import { initThreeHUD, updateThreeHUD, draw, type ThreeHUDState } from "@/components/coach/pose-renderer";
 import Particles, { initParticlesEngine } from "@tsparticles/react";
 import { loadSlim } from "@tsparticles/slim";
@@ -142,10 +144,7 @@ async function parseApiResponse(response: Response) {
   }
 }
 
-const IDS = {
-  workout: ["squat", "pushup", "lunge", "bicep_curl", "jumping_jack", "plank", "warrior"] as ExerciseId[],
-  dance: ["dance_basic", "jumping_jack"] as ExerciseId[],
-};
+const IDS = COACH_EXERCISES;
 
 const DEFAULT_CALIBRATION_FRAMES = 18;
 const CURL_FAST_CALIBRATION_FRAMES = 4;
@@ -216,7 +215,7 @@ const COACH_LEVELS: Array<{ id: CoachLevel; label: string; detail: string }> = [
 ];
 
 const bar = (score: number) => (score >= 88 ? "from-emerald-500 to-green-400" : score >= 72 ? "from-amber-500 to-yellow-400" : score >= 55 ? "from-orange-500 to-amber-400" : "from-rose-500 to-red-500");
-const text = (score: number) => (score >= 88 ? "text-emerald-400" : score >= 72 ? "text-amber-400" : score >= 55 ? "text-orange-400" : "text-rose-400");
+const text = (score: number) => (score >= 88 ? "text-primary" : score >= 72 ? "text-warning" : score >= 55 ? "text-orange-400" : "text-destructive");
 
 function trackedSideLabel(side?: FrameAnalysis["trackedSide"]) {
   if (side === "left") return "Left side";
@@ -276,9 +275,9 @@ function getActiveDanceCheckpoint(routine: DanceRoutinePack | null, elapsedMs: n
 function DanceCoachSkeleton({ training }: { training: DanceTrainingFrameResult }) {
   const skeleton = training.referenceSkeleton;
   return (
-    <div className="rounded-2xl border border-fuchsia-500/20 bg-fuchsia-500/10 p-4">
+    <div className="rounded-2xl border border-border bg-primary/10 p-4">
       <div className="grid gap-4 md:grid-cols-[160px_1fr] md:items-center">
-        <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-3">
+        <div className="rounded-xl border border-border bg-background/80 p-3">
           <svg viewBox="0 0 100 100" className="h-36 w-full">
             {skeleton.connections.map(([from, to]) => {
               const start = skeleton.points[from];
@@ -292,14 +291,14 @@ function DanceCoachSkeleton({ training }: { training: DanceTrainingFrameResult }
         </div>
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge className="bg-fuchsia-500/15 text-fuchsia-200">Count {training.tutorialStep.count}</Badge>
-            <Badge variant="outline" className="border-zinc-700 text-zinc-300">{training.segment.label}</Badge>
+            <Badge className="bg-primary/15 text-primary">Count {training.tutorialStep.count}</Badge>
+            <Badge variant="outline" className="border-border text-foreground">{training.segment.label}</Badge>
           </div>
-          <p className="mt-3 text-sm font-medium text-zinc-100">{training.tutorialStep.teachingCue}</p>
-          <p className="mt-2 text-sm text-zinc-400">{training.tutorialStep.practiceCue}</p>
+          <p className="mt-3 text-sm font-medium text-foreground">{training.tutorialStep.teachingCue}</p>
+          <p className="mt-2 text-sm text-muted-foreground">{training.tutorialStep.practiceCue}</p>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            <p className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 text-xs text-zinc-400">Common miss: {training.tutorialStep.commonMistake}</p>
-            <p className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs text-emerald-100">Fix: {training.primaryCorrection}</p>
+            <p className="rounded-xl border border-border bg-background/60 p-3 text-xs text-muted-foreground">Common miss: {training.tutorialStep.commonMistake}</p>
+            <p className="rounded-xl border border-border bg-primary/10 p-3 text-xs text-primary">Fix: {training.primaryCorrection}</p>
           </div>
         </div>
       </div>
@@ -327,17 +326,17 @@ function scorecardLabels(exerciseId: ExerciseId) {
 const CURL_MEMORY_KEY = "fitness-coach:last-curl-memory";
 
 function statusTone(status: CurlRepScorecard["status"] | "ready" | "blocked") {
-  if (status === "pass" || status === "ready") return "bg-emerald-500/15 text-emerald-300";
-  if (status === "warning") return "bg-amber-500/15 text-amber-300";
-  if (status === "fail" || status === "blocked") return "bg-rose-500/15 text-rose-300";
-  return "bg-zinc-700 text-zinc-200";
+  if (status === "pass" || status === "ready") return "bg-primary/15 text-primary";
+  if (status === "warning") return "bg-amber-500/15 text-warning";
+  if (status === "fail" || status === "blocked") return "bg-rose-500/15 text-destructive";
+  return "bg-secondary text-foreground";
 }
 
 function metricTone(status: string) {
-  if (status === "pass") return "border-emerald-500/30 bg-emerald-500/10";
+  if (status === "pass") return "border-border bg-primary/10";
   if (status === "warning") return "border-amber-500/30 bg-amber-500/10";
   if (status === "fail") return "border-rose-500/30 bg-rose-500/10";
-  return "border-zinc-800 bg-zinc-900/70";
+  return "border-border bg-card/70";
 }
 
 function labelToMetricKey(label?: string): CurlMetricKey | null {
@@ -401,13 +400,14 @@ function buildTeacherReport(evidence: CurlSessionEvidence | null, memory: CurlCo
 }
 
 export default function PoseAnalyzer({ mode = "workout" }: Props) {
+  const searchParams = useSearchParams();
   const { profile, loading: profileLoading, error: profileError } = useUserProfile();
   const persistence = useWorkoutPersistence(profile?.userId);
   const curlMemoryKey = profile?.userId ? `${CURL_MEMORY_KEY}:${profile.userId}` : null;
   const clientSessionIdRef = useRef<string | null>(null);
   const [cameraFacing, setCameraFacing] = useState<"user" | "environment">("user");
   const exercises = useMemo(() => POSE_EXERCISES.filter((item) => IDS[mode].includes(item.id)), [mode]);
-  const [exerciseId, setExerciseId] = useState<ExerciseId>(mode === "dance" ? "dance_basic" : "squat");
+  const [exerciseId, setExerciseId] = useState<ExerciseId>(() => selectCoachExercise(mode, searchParams.get("exercise")));
   const exercise = useMemo(() => exercises.find((item) => item.id === exerciseId) ?? exercises[0], [exerciseId, exercises]);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -1859,10 +1859,10 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       className={cn(
         "relative overflow-hidden rounded-[28px] border bg-black shadow-[0_30px_100px_rgba(0,0,0,0.45)] transition-all duration-500",
         streakCount >= 5
-          ? "border-fuchsia-500 shadow-[0_0_35px_rgba(217,70,239,0.5)] scale-[1.01]"
+          ? "border-border shadow-[0_0_35px_rgba(217,70,239,0.5)] scale-[1.01]"
           : streakCount >= 3
-            ? "border-cyan-500 shadow-[0_0_25px_rgba(6,182,212,0.4)]"
-            : "border-zinc-800",
+            ? "border-border shadow-[0_0_25px_rgba(6,182,212,0.4)]"
+            : "border-border",
         cameraLayout === "portrait" ? "aspect-[3/4]" : "aspect-video",
       )}
     >
@@ -1886,35 +1886,35 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       )}
       {exerciseId === "bicep_curl" && curlReferenceOverlay ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center"><div className="relative" style={cameraGuideStyle}>
-          <div className="absolute left-[18%] top-[28%] h-[42%] w-[22%] rounded-full border border-cyan-300/25" />
-          <div className="absolute right-[18%] top-[28%] h-[42%] w-[22%] rounded-full border border-cyan-300/25" />
-          <div className="absolute left-1/2 top-[30%] h-[42%] w-px -translate-x-1/2 bg-cyan-300/20" />
-          <div className="absolute bottom-[18%] left-1/2 -translate-x-1/2 rounded-full border border-cyan-300/30 bg-zinc-950/55 px-3 py-1 text-xs text-cyan-100">
+          <div className="absolute left-[18%] top-[28%] h-[42%] w-[22%] rounded-full border border-border" />
+          <div className="absolute right-[18%] top-[28%] h-[42%] w-[22%] rounded-full border border-border" />
+          <div className="absolute left-1/2 top-[30%] h-[42%] w-px -translate-x-1/2 bg-primary/20" />
+          <div className="absolute bottom-[18%] left-1/2 -translate-x-1/2 rounded-full border border-border bg-background/55 px-3 py-1 text-xs text-primary">
             Keep elbows close; forearms travel inside the guide.
           </div>
         </div></div>
       ) : null}
 
       <div className="pointer-events-none absolute left-4 top-4 flex flex-wrap gap-2">
-        <Badge className="bg-zinc-950/80 text-zinc-100">{exercise.label}</Badge>
-        <Badge className={cn("border-none text-white", confidence.ready ? "bg-emerald-500/90" : "bg-amber-500/90")}>
+        <Badge className="bg-background/80 text-foreground">{exercise.label}</Badge>
+        <Badge className={cn("border-none text-white", confidence.ready ? "bg-primary/90" : "bg-amber-500/90")}>
           {confidence.frameQuality === "ready" ? "Ready" : confidence.frameQuality.replaceAll("_", " ")}
         </Badge>
-        <Badge className="bg-zinc-950/80 text-zinc-100">{confidence.view}</Badge>
-        <Badge className="bg-zinc-950/80 text-zinc-100">{fps} FPS</Badge>
+        <Badge className="bg-background/80 text-foreground">{confidence.view}</Badge>
+        <Badge className="bg-background/80 text-foreground">{fps} FPS</Badge>
         <Badge className={cn("border-none text-white", text(analysis.overall).replace("text-", "bg-").replace("400", "500/90"))}>
           Score {analysis.overall}
         </Badge>
       </div>
 
-      <div className="absolute right-4 top-4 z-30 flex items-center gap-1 rounded-full border border-zinc-800 bg-zinc-950/80 p-0.5 backdrop-blur">
+      <div className="absolute right-4 top-4 z-30 flex items-center gap-1 rounded-full border border-border bg-background/80 p-0.5 backdrop-blur">
         <button
           onClick={() => setHudMode("2d")}
           className={cn(
             "rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider uppercase transition-all duration-300 cursor-pointer",
             hudMode === "2d"
-              ? "bg-zinc-100 text-zinc-900 shadow-sm"
-              : "text-zinc-400 hover:text-zinc-200"
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
           )}
         >
           2D HUD
@@ -1924,8 +1924,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
           className={cn(
             "rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider uppercase transition-all duration-300 cursor-pointer",
             hudMode === "3d"
-              ? "bg-cyan-500 text-white shadow-[0_0_10px_rgba(6,182,212,0.4)]"
-              : "text-zinc-400 hover:text-zinc-200"
+              ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(6,182,212,0.4)]"
+              : "text-muted-foreground hover:text-foreground"
           )}
         >
           3D HUD
@@ -1933,7 +1933,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       </div>
 
       {trackingPausedReason ? (
-        <div className="pointer-events-none absolute inset-x-4 top-16 rounded-2xl border border-amber-500/40 bg-zinc-950/85 p-3 text-sm text-amber-100">
+        <div className="pointer-events-none absolute inset-x-4 top-16 rounded-2xl border border-amber-500/40 bg-background/85 p-3 text-sm text-warning">
           <p className="font-medium">{unreliableCameraGuidance?.title ?? "Tracking paused"}</p>
           <p className="mt-1">{unreliableCameraGuidance?.message ?? trackingPausedReason}</p>
         </div>
@@ -1964,44 +1964,44 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       ) : null}
 
       {running ? (
-        <div className="absolute inset-x-4 bottom-4 flex flex-wrap items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-950/85 px-4 py-3 text-sm text-zinc-200 backdrop-blur">
-          <div className="flex items-center gap-2 rounded-full bg-zinc-900 px-3 py-1.5">
-            <Timer className="h-4 w-4 text-cyan-300" />
+        <div className="absolute inset-x-4 bottom-4 flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-background/85 px-4 py-3 text-sm text-foreground backdrop-blur">
+          <div className="flex items-center gap-2 rounded-full bg-card px-3 py-1.5">
+            <Timer className="h-4 w-4 text-primary" />
             <span>{seconds}s</span>
           </div>
-          <div className="flex items-center gap-2 rounded-full bg-zinc-900 px-3 py-1.5">
+          <div className="flex items-center gap-2 rounded-full bg-card px-3 py-1.5">
             <Zap className="h-4 w-4 text-orange-300" />
             <span>{repsRef.current} reps</span>
           </div>
-          <div className="flex items-center gap-2 rounded-full bg-zinc-900 px-3 py-1.5">
-            <Waves className="h-4 w-4 text-fuchsia-300" />
+          <div className="flex items-center gap-2 rounded-full bg-card px-3 py-1.5">
+            <Waves className="h-4 w-4 text-primary" />
             <span>{calories} kcal</span>
           </div>
-          <div className="flex items-center gap-2 rounded-full bg-zinc-900 px-3 py-1.5">
-            <Target className="h-4 w-4 text-emerald-300" />
+          <div className="flex items-center gap-2 rounded-full bg-card px-3 py-1.5">
+            <Target className="h-4 w-4 text-primary" />
             <span>Score {analysis.overall}</span>
           </div>
-          <div className="flex items-center gap-2 rounded-full bg-zinc-900 px-3 py-1.5">
-            <CheckCircle2 className="h-4 w-4 text-cyan-300" />
+          <div className="flex items-center gap-2 rounded-full bg-card px-3 py-1.5">
+            <CheckCircle2 className="h-4 w-4 text-primary" />
             <span>{qualityPercent}% reliable</span>
           </div>
           <div className="ml-auto flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-100" onClick={() => setMirror((value) => !value)}>
+            <Button size="sm" variant="outline" className="border-border bg-card text-foreground" onClick={() => setMirror((value) => !value)}>
               {mirror ? <Monitor className="h-4 w-4" /> : <RotateCcw className="h-4 w-4" />}
               Mirror
             </Button>
-            <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-100" onClick={() => setVoiceEnabled((value) => !value)}>
+            <Button size="sm" variant="outline" className="border-border bg-card text-foreground" onClick={() => setVoiceEnabled((value) => !value)}>
               {voiceEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
               Voice
             </Button>
-            <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-100" onClick={() => setCameraLayout((value) => (value === "landscape" ? "portrait" : "landscape"))}>
+            <Button size="sm" variant="outline" className="border-border bg-card text-foreground" onClick={() => setCameraLayout((value) => (value === "landscape" ? "portrait" : "landscape"))}>
               {cameraLayout === "landscape" ? <Smartphone className="h-4 w-4" /> : <Monitor className="h-4 w-4" />}
               Layout
             </Button>
             <Button
               size="sm"
               variant="outline"
-              className="border-zinc-700 bg-zinc-900 text-zinc-100"
+              className="border-border bg-card text-foreground"
               onClick={() => setCameraViewMode((value) => (value === "pip" ? "full" : "pip"))}
             >
               {cameraViewMode === "pip" ? <Maximize2 className="h-4 w-4" /> : <Minimize2 className="h-4 w-4" />}
@@ -2018,17 +2018,17 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   );
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(135deg,_rgba(190,255,90,0.08),_transparent_32%),linear-gradient(225deg,_rgba(45,212,191,0.08),_transparent_30%),linear-gradient(180deg,_#070b0f,_#10151b_45%,_#070b0f)] text-zinc-100">
+    <div className="min-h-screen bg-background text-foreground">
       <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-6 sm:px-6 xl:px-8">
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.8fr)_minmax(360px,1fr)]">
           <div className="space-y-4">
-            <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
+            <Card className="border-border bg-background/70 text-foreground">
               <CardHeader className="pb-4">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                   <div>
                     <Badge className="mb-3">{mode === "dance" ? "Dance coach" : "Workout coach"}</Badge>
                     <CardTitle className="text-4xl font-black uppercase">{exercise.label}</CardTitle>
-                    <CardDescription className="mt-2 max-w-3xl text-zinc-400">{exerciseDescription}</CardDescription>
+                    <CardDescription className="mt-2 max-w-3xl text-muted-foreground">{exerciseDescription}</CardDescription>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {exercises.map((item) => (
@@ -2036,7 +2036,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                         key={item.id}
                         size="sm"
                         variant={item.id === exerciseId ? "default" : "outline"}
-                        className={cn(item.id === exerciseId ? "bg-primary text-primary-foreground" : "border-zinc-700 bg-zinc-950 text-zinc-200")}
+                        className={cn(item.id === exerciseId ? "bg-primary text-primary-foreground" : "border-border bg-background text-foreground")}
                         onClick={() => {
                           if (item.id === exerciseId) return;
                           stopCamera();
@@ -2050,11 +2050,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   </div>
                 </div>
                 {mode === "workout" ? (
-                  <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-3">
+                  <div className="mt-4 rounded-2xl border border-border bg-card/60 p-3">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                       <div>
-                        <p className="text-sm font-medium text-zinc-100">Coach level</p>
-                        <p className="mt-1 text-xs text-zinc-400">{exerciseId === "bicep_curl" ? coachLevelDetail : "Level controls are tuned for bicep curls first."}</p>
+                        <p className="text-sm font-medium text-foreground">Coach level</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{exerciseId === "bicep_curl" ? coachLevelDetail : "Level controls are tuned for bicep curls first."}</p>
                       </div>
                       <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
                         <div className="grid grid-cols-3 gap-2">
@@ -2065,7 +2065,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                               variant={coachLevel === item.id ? "default" : "outline"}
                               className={cn(
                                 "min-w-20",
-                                coachLevel === item.id ? "bg-zinc-100 text-zinc-950 hover:bg-white" : "border-zinc-700 bg-zinc-950 text-zinc-200",
+                                coachLevel === item.id ? "bg-primary text-primary-foreground hover:bg-white" : "border-border bg-background text-foreground",
                               )}
                               onClick={() => setCoachLevel(item.id)}
                             >
@@ -2073,12 +2073,12 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                             </Button>
                           ))}
                         </div>
-                        {process.env.NODE_ENV !== "production" && <Button size="sm" variant="outline" className="border-cyan-700/60 bg-cyan-500/10 text-cyan-100" onClick={loadCurlTeacherDemo}>
+                        {process.env.NODE_ENV !== "production" && <Button size="sm" variant="outline" className="border-border bg-primary/10 text-primary" onClick={loadCurlTeacherDemo}>
                           <Clipboard className="h-4 w-4" />
                           Teacher demo
                         </Button>}
                         {exerciseId === "bicep_curl" ? (
-                          <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-950 text-zinc-200" onClick={() => setCurlReferenceOverlay((value) => !value)}>
+                          <Button size="sm" variant="outline" className="border-border bg-background text-foreground" onClick={() => setCurlReferenceOverlay((value) => !value)}>
                             <Target className="h-4 w-4" />
                             Guide
                           </Button>
@@ -2099,17 +2099,17 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
           onPointerMove={onPipPointerMove}
           onPointerUp={onPipPointerUp}
         >
-          <div className={cn(cameraViewMode === "pip" && "overflow-hidden rounded-[28px] border border-zinc-700 bg-zinc-950/95 shadow-[0_30px_100px_rgba(0,0,0,0.55)] backdrop-blur")}>
-            <div className={cn("items-center justify-between border-b border-zinc-800 px-4 py-3 text-sm text-zinc-200", cameraViewMode === "pip" ? "flex" : "hidden")}>
+          <div className={cn(cameraViewMode === "pip" && "overflow-hidden rounded-[28px] border border-border bg-background/95 shadow-[0_30px_100px_rgba(0,0,0,0.55)] backdrop-blur")}>
+            <div className={cn("items-center justify-between border-b border-border px-4 py-3 text-sm text-foreground", cameraViewMode === "pip" ? "flex" : "hidden")}>
               <button type="button" className="flex items-center gap-2" onPointerDown={onPipPointerDown}>
-                <GripVertical className="h-4 w-4 text-zinc-500" />
+                <GripVertical className="h-4 w-4 text-muted-foreground" />
                 Camera monitor
               </button>
               <div className="flex gap-2">
-                <Button aria-label="Minimize camera preview" size="icon" variant="ghost" className="h-8 w-8 text-zinc-300 hover:bg-zinc-800" onClick={() => setCameraViewMode("minimized")}>
+                <Button aria-label="Minimize camera preview" size="icon" variant="ghost" className="h-8 w-8 text-foreground hover:bg-secondary" onClick={() => setCameraViewMode("minimized")}>
                   <Minimize2 className="h-4 w-4" />
                 </Button>
-                <Button aria-label="Expand camera preview" size="icon" variant="ghost" className="h-8 w-8 text-zinc-300 hover:bg-zinc-800" onClick={() => setCameraViewMode("full")}>
+                <Button aria-label="Expand camera preview" size="icon" variant="ghost" className="h-8 w-8 text-foreground hover:bg-secondary" onClick={() => setCameraViewMode("full")}>
                   <Maximize2 className="h-4 w-4" />
                 </Button>
               </div>
@@ -2119,13 +2119,13 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         </div>
 
             {cameraViewMode === "minimized" ? (
-              <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
+              <Card className="border-border bg-background/70 text-foreground">
                 <CardContent className="flex items-center justify-between gap-3 p-4">
                   <div>
                     <p className="font-medium">Camera is minimized</p>
-                    <p className="text-sm text-zinc-400">Tracking stays active while the viewport is hidden.</p>
+                    <p className="text-sm text-muted-foreground">Tracking stays active while the viewport is hidden.</p>
                   </div>
-                  <Button className="bg-zinc-100 text-zinc-950 hover:bg-white" onClick={() => setCameraViewMode("full")}>
+                  <Button className="bg-primary text-primary-foreground hover:bg-white" onClick={() => setCameraViewMode("full")}>
                     Restore camera
                   </Button>
                 </CardContent>
@@ -2134,64 +2134,64 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
           </div>
 
           <div className="space-y-4">
-            <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
+            <Card className="border-border bg-background/70 text-foreground">
               <CardHeader>
                 <CardTitle>Live feedback</CardTitle>
-                <CardDescription className="text-zinc-400">
+                <CardDescription className="text-muted-foreground">
                   {exerciseId === "bicep_curl"
                     ? `${coachLevel[0].toUpperCase()}${coachLevel.slice(1)} curl coaching: ${coachLevelDetail}`
                     : "Camera-based posture guidance: visibility and camera confidence gate every cue. This is not a medical device."}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className={cn("rounded-2xl border p-4", analysis.injuryRisks.length ? "border-rose-500/40 bg-rose-500/10" : analysis.corrections.length ? "border-amber-500/40 bg-amber-500/10" : "border-emerald-500/30 bg-emerald-500/10")}>
+                <div className={cn("rounded-2xl border p-4", analysis.injuryRisks.length ? "border-rose-500/40 bg-rose-500/10" : analysis.corrections.length ? "border-amber-500/40 bg-amber-500/10" : "border-border bg-primary/10")}>
                   <p className="text-lg font-semibold">{unreliableCameraGuidance ? unreliableCameraGuidance.title : feedback}</p>
-                  <p className="mt-2 text-sm text-zinc-300">{unreliableCameraGuidance ? unreliableCameraGuidance.message : secondaryFeedback}</p>
+                  <p className="mt-2 text-sm text-foreground">{unreliableCameraGuidance ? unreliableCameraGuidance.message : secondaryFeedback}</p>
                 </div>
                 <div className="grid gap-3 md:grid-cols-3">
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Primary correction</p>
-                    <p className="mt-2 text-sm text-zinc-200">
+                  <div className="rounded-2xl border border-border bg-card/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Primary correction</p>
+                    <p className="mt-2 text-sm text-foreground">
                       {unreliableCameraGuidance ? "Fix camera reliability first." : analysis.corrections[0] ?? danceComparison?.primaryIssue ?? sessionFocusMetric?.cue ?? "Hold steady and keep the rhythm controlled."}
                     </p>
                   </div>
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Measured value</p>
-                    <p className="mt-2 text-sm font-medium text-zinc-100">{livePrimaryMetric.label}</p>
-                    <p className="mt-1 text-sm text-zinc-300">{livePrimaryMetric.measured}</p>
+                  <div className="rounded-2xl border border-border bg-card/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Measured value</p>
+                    <p className="mt-2 text-sm font-medium text-foreground">{livePrimaryMetric.label}</p>
+                    <p className="mt-1 text-sm text-foreground">{livePrimaryMetric.measured}</p>
                   </div>
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Target range</p>
-                    <p className="mt-2 text-sm text-zinc-200">{livePrimaryMetric.target}</p>
+                  <div className="rounded-2xl border border-border bg-card/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Target range</p>
+                    <p className="mt-2 text-sm text-foreground">{livePrimaryMetric.target}</p>
                   </div>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">What is right</p>
-                    <p className="mt-2 text-sm text-zinc-200">{analysis.positives[0] ?? "Hold the current shape and keep the rhythm stable."}</p>
+                  <div className="rounded-2xl border border-border bg-card/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">What is right</p>
+                    <p className="mt-2 text-sm text-foreground">{analysis.positives[0] ?? "Hold the current shape and keep the rhythm stable."}</p>
                   </div>
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Fix now</p>
-                    <p className="mt-2 text-sm text-zinc-200">{unreliableCameraGuidance ? unreliableCameraGuidance.reason : analysis.corrections[0] ?? analysis.targetCue ?? "No immediate correction. Stay consistent."}</p>
+                  <div className="rounded-2xl border border-border bg-card/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Fix now</p>
+                    <p className="mt-2 text-sm text-foreground">{unreliableCameraGuidance ? unreliableCameraGuidance.reason : analysis.corrections[0] ?? analysis.targetCue ?? "No immediate correction. Stay consistent."}</p>
                   </div>
                 </div>
                 {exerciseId === "bicep_curl" ? (
                   <div className="grid gap-3 md:grid-cols-2">
-                    <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-4">
+                    <div className="rounded-2xl border border-border bg-primary/10 p-4">
                       <div className="flex items-center gap-2">
-                        <Target className="h-4 w-4 text-cyan-200" />
-                        <p className="text-sm font-medium text-cyan-100">One issue focus</p>
+                        <Target className="h-4 w-4 text-primary" />
+                        <p className="text-sm font-medium text-primary">One issue focus</p>
                       </div>
-                      <p className="mt-2 text-sm text-zinc-200">
+                      <p className="mt-2 text-sm text-foreground">
                         {curlFocus ? (curlFocus.improved ? `${curlFocus.label} improved. Keep the same shape for 2 more reps.` : curlFocus.cue) : "After the first scored rep, the coach will choose one correction instead of stacking many cues."}
                       </p>
                     </div>
-                    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                    <div className="rounded-2xl border border-border bg-card/60 p-4">
                       <div className="flex items-center gap-2">
-                        <Brain className="h-4 w-4 text-fuchsia-300" />
-                        <p className="text-sm font-medium text-zinc-200">Coach memory</p>
+                        <Brain className="h-4 w-4 text-primary" />
+                        <p className="text-sm font-medium text-foreground">Coach memory</p>
                       </div>
-                      <p className="mt-2 text-sm text-zinc-300">
+                      <p className="mt-2 text-sm text-foreground">
                         {curlCoachMemory?.primaryMetric
                           ? `Last curl session: watch ${curlCoachMemory.primaryMetric.toLowerCase()} first. Average ${curlCoachMemory.lastAverageScore}, reliability ${curlCoachMemory.reliabilityAverage}%.`
                           : "No curl memory yet. Complete or load a curl set to save the main next-session focus."}
@@ -2199,17 +2199,17 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                     </div>
                   </div>
                 ) : null}
-                <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                <div className="rounded-2xl border border-border bg-card/60 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
-                      <Mic className="h-4 w-4 text-cyan-300" />
-                      <p className="text-sm font-medium text-zinc-200">AI refinement {coachSource ? `(${coachSource})` : ""}</p>
+                      <Mic className="h-4 w-4 text-primary" />
+                      <p className="text-sm font-medium text-foreground">AI refinement {coachSource ? `(${coachSource})` : ""}</p>
                     </div>
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
-                      className="h-8 border-cyan-400/30 bg-cyan-400/10 px-3 text-xs text-cyan-100 hover:bg-cyan-400/20"
+                      className="h-8 border-border bg-primary/10 px-3 text-xs text-primary hover:bg-primary/20"
                       disabled={isCoachRequesting}
                       onClick={requestManualCoach}
                     >
@@ -2217,59 +2217,59 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                       {isCoachRequesting ? "Asking" : "Ask AI"}
                     </Button>
                   </div>
-                  <p className="mt-2 text-sm text-zinc-300">{coachLine || "The grounded rule + ML evidence layer is active. AI refinement appears on meaningful changes and post-set summaries, without medical diagnosis."}</p>
+                  <p className="mt-2 text-sm text-foreground">{coachLine || "The grounded rule + ML evidence layer is active. AI refinement appears on meaningful changes and post-set summaries, without medical diagnosis."}</p>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
+            <Card className="border-border bg-background/70 text-foreground">
               <CardHeader>
                 <CardTitle>Calibration and tracking</CardTitle>
-                <CardDescription className="text-zinc-400">Rep counting and posture judgments only run when frame quality is ready. Guidance is coach-style feedback, not clinical diagnosis.</CardDescription>
+                <CardDescription className="text-muted-foreground">Rep counting and posture judgments only run when frame quality is ready. Guidance is coach-style feedback, not clinical diagnosis.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Frame quality</p>
+                  <div className="rounded-2xl border border-border bg-card/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Frame quality</p>
                     <p className="mt-2 text-lg font-semibold capitalize">{confidence.frameQuality.replaceAll("_", " ")}</p>
-                    <p className="mt-2 text-sm text-zinc-400">{confidence.message}</p>
+                    <p className="mt-2 text-sm text-muted-foreground">{confidence.message}</p>
                   </div>
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Camera profile</p>
+                  <div className="rounded-2xl border border-border bg-card/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Camera profile</p>
                     <p className="mt-2 text-lg font-semibold">{cameraProfileLabel}</p>
-                    <p className="mt-2 text-sm text-zinc-400">Allowed views: {confidence.allowedViews.join(", ")}</p>
+                    <p className="mt-2 text-sm text-muted-foreground">Allowed views: {confidence.allowedViews.join(", ")}</p>
                   </div>
                 </div>
                 <div className="space-y-3">
                   <div>
                     <div className="mb-2 flex items-center justify-between text-sm">
-                      <span className="text-zinc-400">Tracking confidence</span>
-                      <span className="font-medium text-zinc-100">{qualityPercent}%</span>
+                      <span className="text-muted-foreground">Tracking confidence</span>
+                      <span className="font-medium text-foreground">{qualityPercent}%</span>
                     </div>
-                    <Progress value={qualityPercent} className="h-2 bg-zinc-800" />
+                    <Progress value={qualityPercent} className="h-2 bg-secondary" />
                   </div>
-                  <div className="grid gap-2 text-sm text-zinc-300 sm:grid-cols-3">
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2">View: <span className="font-medium text-zinc-100">{confidence.view}</span></div>
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2">Brightness: <span className="font-medium text-zinc-100">{Math.round(confidence.brightness)}</span></div>
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2">Motion: <span className="font-medium text-zinc-100">{confidence.motion.toFixed(1)}</span></div>
+                  <div className="grid gap-2 text-sm text-foreground sm:grid-cols-3">
+                    <div className="rounded-xl border border-border bg-card/60 px-3 py-2">View: <span className="font-medium text-foreground">{confidence.view}</span></div>
+                    <div className="rounded-xl border border-border bg-card/60 px-3 py-2">Brightness: <span className="font-medium text-foreground">{Math.round(confidence.brightness)}</span></div>
+                    <div className="rounded-xl border border-border bg-card/60 px-3 py-2">Motion: <span className="font-medium text-foreground">{confidence.motion.toFixed(1)}</span></div>
                   </div>
                 </div>
                 {exerciseId === "bicep_curl" ? (
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Curl setup wizard</p>
+                  <div className="rounded-2xl border border-border bg-card/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Curl setup wizard</p>
                     <div className="mt-3 grid gap-2">
                       {setupSteps.map((step) => (
-                        <div key={step.label} className="flex items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                        <div key={step.label} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-background/60 px-3 py-2">
                           <div className="flex min-w-0 items-center gap-2">
-                            {step.ready ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" /> : <XCircle className="h-4 w-4 shrink-0 text-amber-300" />}
-                            <span className="text-sm font-medium text-zinc-100">{step.label}</span>
+                            {step.ready ? <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" /> : <XCircle className="h-4 w-4 shrink-0 text-warning" />}
+                            <span className="text-sm font-medium text-foreground">{step.label}</span>
                           </div>
-                          <span className="text-right text-xs text-zinc-400">{step.detail}</span>
+                          <span className="text-right text-xs text-muted-foreground">{step.detail}</span>
                         </div>
                       ))}
                     </div>
                     {coachLevel === "hard" && !curlBaseline?.ready ? (
-                      <p className="mt-3 text-xs text-amber-200">Hard mode can start now; small-error judging gets sharper as the curl baseline fills in.</p>
+                      <p className="mt-3 text-xs text-warning">Hard mode can start now; small-error judging gets sharper as the curl baseline fills in.</p>
                     ) : null}
                   </div>
                 ) : null}
@@ -2278,16 +2278,16 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
 
             {/* Muscle Engagement Heatmap HUD Card */}
             {running && (
-              <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
+              <Card className="border-border bg-background/70 text-foreground">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold tracking-wider text-zinc-300">MUSCLE ENGAGEMENT HUD</CardTitle>
+                  <CardTitle className="text-sm font-semibold tracking-wider text-foreground">MUSCLE ENGAGEMENT HUD</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
                     <span>Active Movers</span>
                     <span>Intensity: {Math.min(100, repsRef.current * 10)}%</span>
                   </div>
-                  <div className="flex items-center justify-center gap-6 rounded-2xl border border-zinc-900 bg-zinc-900/40 p-4">
+                  <div className="flex items-center justify-center gap-6 rounded-2xl border border-border bg-card/40 p-4">
                     <svg viewBox="0 0 100 160" className="h-28 w-20 drop-shadow-[0_0_10px_rgba(0,0,0,0.55)]">
                       <circle cx="50" cy="18" r="10" className="fill-zinc-800/60 stroke-zinc-700/50" />
                       <rect
@@ -2346,17 +2346,17 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                         )}
                       />
                     </svg>
-                    <div className="flex flex-col gap-1.5 text-[11px] text-zinc-300">
+                    <div className="flex flex-col gap-1.5 text-[11px] text-foreground">
                       <div className="flex items-center gap-2">
-                        <span className={cn("h-2.5 w-2.5 rounded-full", exerciseId === "bicep_curl" || exerciseId === "pushup" ? "bg-rose-400 animate-pulse" : "bg-zinc-700")} />
+                        <span className={cn("h-2.5 w-2.5 rounded-full", exerciseId === "bicep_curl" || exerciseId === "pushup" ? "bg-rose-400 animate-pulse" : "bg-secondary")} />
                         <span>Arms / Chest</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className={cn("h-2.5 w-2.5 rounded-full", exerciseId === "plank" || exerciseId === "pushup" ? "bg-amber-400" : "bg-zinc-700")} />
+                        <span className={cn("h-2.5 w-2.5 rounded-full", exerciseId === "plank" || exerciseId === "pushup" ? "bg-amber-400" : "bg-secondary")} />
                         <span>Core Stabilizers</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className={cn("h-2.5 w-2.5 rounded-full", exerciseId === "squat" || exerciseId === "lunge" ? "bg-cyan-400" : "bg-zinc-700")} />
+                        <span className={cn("h-2.5 w-2.5 rounded-full", exerciseId === "squat" || exerciseId === "lunge" ? "bg-primary" : "bg-secondary")} />
                         <span>Legs (Quads/Glutes)</span>
                       </div>
                     </div>
@@ -2365,21 +2365,21 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
               </Card>
             )}
 
-            <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
+            <Card className="border-border bg-background/70 text-foreground">
               <CardHeader>
                 <CardTitle>Score breakdown</CardTitle>
-                <CardDescription className="text-zinc-400">Scores reflect visible movement measurements. Learned form assessment stays disabled until validated.</CardDescription>
+                <CardDescription className="text-muted-foreground">Scores reflect visible movement measurements. Learned form assessment stays disabled until validated.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {exerciseId === "squat" || exerciseId === "bicep_curl" ? (
-                  <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-4">
+                  <div className="rounded-2xl border border-border bg-primary/10 p-4">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <div className="flex items-center gap-2">
-                          <Brain className="h-4 w-4 text-cyan-200" />
-                          <p className="text-sm font-medium text-cyan-100">Posture evidence</p>
+                          <Brain className="h-4 w-4 text-primary" />
+                          <p className="text-sm font-medium text-primary">Posture evidence</p>
                         </div>
-                        <p className="mt-2 text-sm text-zinc-300">
+                        <p className="mt-2 text-sm text-foreground">
                           {mlPrediction
                             ? mlPrediction.suppressed
                               ? "Posture indicators unavailable because tracking is unreliable."
@@ -2388,42 +2388,42 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                         </p>
                       </div>
                       <div className="grid min-w-40 grid-cols-2 gap-2 text-center">
-                        <div className="rounded-xl border border-cyan-400/20 bg-zinc-950/50 p-3">
-                          <p className="text-xs text-zinc-500">Quality</p>
+                        <div className="rounded-xl border border-border bg-background/50 p-3">
+                          <p className="text-xs text-muted-foreground">Quality</p>
                           <p className={cn("mt-1 text-xl font-semibold", text(mlPrediction?.predictedQuality ?? 0))}>{mlPrediction?.predictedQuality ?? "--"}</p>
                         </div>
-                        <div className="rounded-xl border border-cyan-400/20 bg-zinc-950/50 p-3">
-                          <p className="text-xs text-zinc-500">Confidence</p>
-                          <p className="mt-1 text-xl font-semibold text-cyan-200">{mlPrediction?.calibratedConfidence != null ? `${Math.round(mlPrediction.calibratedConfidence * 100)}%` : "Uncalibrated"}</p>
+                        <div className="rounded-xl border border-border bg-background/50 p-3">
+                          <p className="text-xs text-muted-foreground">Confidence</p>
+                          <p className="mt-1 text-xl font-semibold text-primary">{mlPrediction?.calibratedConfidence != null ? `${Math.round(mlPrediction.calibratedConfidence * 100)}%` : "Uncalibrated"}</p>
                         </div>
                       </div>
                     </div>
                     {mlMistakeRows.length ? (
                       <div className="mt-4 grid gap-2 sm:grid-cols-2">
                         {mlMistakeRows.map((item) => (
-                          <div key={item.key} className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                          <div key={item.key} className="rounded-xl border border-border bg-background/60 px-3 py-2">
                             <div className="flex items-center justify-between gap-3 text-sm">
-                              <span className="font-medium text-zinc-100">{item.label}</span>
-                              <span className="text-cyan-200">{Math.round(item.probability * 100)}{mlPrediction?.source === "learned" ? "%" : " / 100 indicator"}</span>
+                              <span className="font-medium text-foreground">{item.label}</span>
+                              <span className="text-primary">{Math.round(item.probability * 100)}{mlPrediction?.source === "learned" ? "%" : " / 100 indicator"}</span>
                             </div>
-                            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-800">
-                              <div className="h-full rounded-full bg-cyan-400" style={{ width: `${Math.round(item.probability * 100)}%` }} />
+                            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary">
+                              <div className="h-full rounded-full bg-primary" style={{ width: `${Math.round(item.probability * 100)}%` }} />
                             </div>
                           </div>
                         ))}
                       </div>
                     ) : null}
-                    <p className="mt-3 text-xs text-zinc-500">Model: {mlPrediction?.modelVersion ?? "heuristic-rules-v2"} • evidence-only coaching, not diagnosis</p>
+                    <p className="mt-3 text-xs text-muted-foreground">Model: {mlPrediction?.modelVersion ?? "heuristic-rules-v2"} • evidence-only coaching, not diagnosis</p>
                   </div>
                 ) : null}
                 <div className="grid gap-3 sm:grid-cols-2">
                   {scorecardRows.map((item) => (
-                    <div key={item.label} className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                    <div key={item.label} className="rounded-2xl border border-border bg-card/60 p-4">
                       <div className="flex items-center justify-between">
-                        <p className="text-sm text-zinc-400">{item.label}</p>
+                        <p className="text-sm text-muted-foreground">{item.label}</p>
                         <span className={cn("text-sm font-semibold", text(item.score))}>{item.score}</span>
                       </div>
-                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-800">
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-secondary">
                         <div className={cn("h-full rounded-full bg-gradient-to-r", bar(item.score))} style={{ width: `${Math.max(4, item.score)}%` }} />
                       </div>
                     </div>
@@ -2431,11 +2431,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                 </div>
                 <div className="space-y-2">
                   {primaryMetrics.map((metric) => (
-                    <div key={`${metric.name}-${metric.detail}`} className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-3">
+                    <div key={`${metric.name}-${metric.detail}`} className="rounded-xl border border-border bg-card/60 px-3 py-3">
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <p className="text-sm font-medium text-zinc-100">{metric.name}</p>
-                          <p className="text-xs text-zinc-500">{metric.detail}</p>
+                          <p className="text-sm font-medium text-foreground">{metric.name}</p>
+                          <p className="text-xs text-muted-foreground">{metric.detail}</p>
                         </div>
                         <span className={cn("text-sm font-semibold", text(metric.score))}>{metric.score}</span>
                       </div>
@@ -2443,38 +2443,38 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   ))}
                 </div>
                 {exerciseId === "bicep_curl" ? (
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                  <div className="rounded-2xl border border-border bg-card/60 p-4">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Curl accuracy</p>
-                        <p className="mt-2 text-sm text-zinc-300">
+                        <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Curl accuracy</p>
+                        <p className="mt-2 text-sm text-foreground">
                           {curlBaseline?.ready
                             ? `Baseline locked at ${Math.round(curlBaseline.confidence * 100)}% confidence.`
                             : curlBaseline?.message ?? "Start curls now; keep shoulders, elbows, wrists, and hips visible so the baseline improves."}
                         </p>
                       </div>
-                      <Badge className={cn("w-fit", curlBaseline?.ready ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-300")}>
+                      <Badge className={cn("w-fit", curlBaseline?.ready ? "bg-primary/15 text-primary" : "bg-amber-500/15 text-warning")}>
                         {curlBaseline?.ready ? "Baseline ready" : "Calibrating"}
                       </Badge>
                     </div>
-                    {curlDemoActive ? <Badge className="mt-3 bg-cyan-500/15 text-cyan-200">Teacher demo evidence loaded</Badge> : null}
+                    {curlDemoActive ? <Badge className="mt-3 bg-primary/15 text-primary">Teacher demo evidence loaded</Badge> : null}
                     {curlEvidence?.totalReps ? (
                       <div className="mt-4 grid gap-2 sm:grid-cols-4">
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-                          <p className="text-xs text-zinc-500">Average</p>
+                        <div className="rounded-xl border border-border bg-background/60 p-3">
+                          <p className="text-xs text-muted-foreground">Average</p>
                           <p className={cn("mt-1 text-xl font-semibold", text(curlEvidence.averageScore))}>{curlEvidence.averageScore}</p>
                         </div>
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-                          <p className="text-xs text-zinc-500">Best</p>
-                          <p className="mt-1 text-xl font-semibold text-emerald-300">Rep {curlEvidence.bestRep}</p>
+                        <div className="rounded-xl border border-border bg-background/60 p-3">
+                          <p className="text-xs text-muted-foreground">Best</p>
+                          <p className="mt-1 text-xl font-semibold text-primary">Rep {curlEvidence.bestRep}</p>
                         </div>
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-                          <p className="text-xs text-zinc-500">Worst</p>
-                          <p className="mt-1 text-xl font-semibold text-rose-300">Rep {curlEvidence.worstRep}</p>
+                        <div className="rounded-xl border border-border bg-background/60 p-3">
+                          <p className="text-xs text-muted-foreground">Worst</p>
+                          <p className="mt-1 text-xl font-semibold text-destructive">Rep {curlEvidence.worstRep}</p>
                         </div>
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-                          <p className="text-xs text-zinc-500">Trend</p>
-                          <p className={cn("mt-1 text-xl font-semibold", curlEvidence.improvementTrend >= 0 ? "text-emerald-300" : "text-rose-300")}>
+                        <div className="rounded-xl border border-border bg-background/60 p-3">
+                          <p className="text-xs text-muted-foreground">Trend</p>
+                          <p className={cn("mt-1 text-xl font-semibold", curlEvidence.improvementTrend >= 0 ? "text-primary" : "text-destructive")}>
                             {curlEvidence.improvementTrend >= 0 ? "+" : ""}
                             {curlEvidence.improvementTrend}
                           </p>
@@ -2484,11 +2484,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                     {curlRepScorecards.length ? (
                       <div className="mt-4 space-y-2">
                         {curlRepScorecards.slice(-5).map((rep) => (
-                          <div key={rep.repNumber} className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                          <div key={rep.repNumber} className="rounded-xl border border-border bg-background/60 p-3">
                             <div className="flex items-center justify-between gap-3">
                               <div>
-                                <p className="text-sm font-medium text-zinc-100">Rep {rep.repNumber}</p>
-                                <p className="mt-1 text-xs text-zinc-500">
+                                <p className="text-sm font-medium text-foreground">Rep {rep.repNumber}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">
                                   {rep.status === "pass"
                                     ? "Clean rep"
                                     : rep.worstMetric
@@ -2507,27 +2507,27 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                                 .filter((metric) => metric.status === "fail" || metric.status === "warning")
                                 .slice(0, 4)
                                 .map((metric) => (
-                                  <div key={`${rep.repNumber}-${metric.key}`} className={cn("rounded-lg border px-2 py-2 text-xs text-zinc-300", metricTone(metric.status))}>
-                                    <span className="font-medium text-zinc-100">{metric.label}</span>: {metric.reliable ? metric.score : "not reliable"}
+                                  <div key={`${rep.repNumber}-${metric.key}`} className={cn("rounded-lg border px-2 py-2 text-xs text-foreground", metricTone(metric.status))}>
+                                    <span className="font-medium text-foreground">{metric.label}</span>: {metric.reliable ? metric.score : "not reliable"}
                                   </div>
                                 ))}
                             </div>
                           </div>
                         ))}
-                        <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-                          <p className="mb-3 text-xs uppercase tracking-[0.24em] text-zinc-500">Rep timeline heatmap</p>
+                        <div className="mt-4 overflow-x-auto rounded-xl border border-border bg-background/60 p-3">
+                          <p className="mb-3 text-xs uppercase tracking-[0.24em] text-muted-foreground">Rep timeline heatmap</p>
                           <div className="grid min-w-[640px] gap-2" style={{ gridTemplateColumns: "80px repeat(8, minmax(64px, 1fr))" }}>
-                            <div className="text-xs text-zinc-500">Rep</div>
+                            <div className="text-xs text-muted-foreground">Rep</div>
                             {(["elbowPath", "shoulderStability", "torsoStability", "wristStack", "topFinish", "bottomExtension", "tempo", "symmetry"] as CurlMetricKey[]).map((key) => (
-                              <div key={key} className="truncate text-xs text-zinc-500">{getCurlMetricLabel(key)}</div>
+                              <div key={key} className="truncate text-xs text-muted-foreground">{getCurlMetricLabel(key)}</div>
                             ))}
                             {curlRepScorecards.map((rep) => (
                               <div key={`rep-row-${rep.repNumber}`} className="contents">
-                                <div className="text-sm font-medium text-zinc-100">Rep {rep.repNumber}</div>
+                                <div className="text-sm font-medium text-foreground">Rep {rep.repNumber}</div>
                                 {(["elbowPath", "shoulderStability", "torsoStability", "wristStack", "topFinish", "bottomExtension", "tempo", "symmetry"] as CurlMetricKey[]).map((key) => {
                                   const metric = rep.metrics[key];
                                   return (
-                                    <div key={`${rep.repNumber}-${key}`} className={cn("rounded-md border px-2 py-1 text-xs text-zinc-100", metricTone(metric.status))}>
+                                    <div key={`${rep.repNumber}-${key}`} className={cn("rounded-md border px-2 py-1 text-xs text-foreground", metricTone(metric.status))}>
                                       {metric.reliable ? metric.score : "n/a"}
                                     </div>
                                   );
@@ -2538,54 +2538,54 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                         </div>
                       </div>
                     ) : (
-                      <p className="mt-4 text-sm text-zinc-400">Rep scorecards will appear here after each completed curl.</p>
+                      <p className="mt-4 text-sm text-muted-foreground">Rep scorecards will appear here after each completed curl.</p>
                     )}
                   </div>
                 ) : null}
                 {exerciseId === "squat" ? (
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                  <div className="rounded-2xl border border-border bg-card/60 p-4">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Squat accuracy</p>
-                        <p className="mt-2 text-sm text-zinc-300">Rep scorecards track depth, knee tracking, torso stack, hip centering, symmetry, shoulder stability, and tempo.</p>
+                        <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Squat accuracy</p>
+                        <p className="mt-2 text-sm text-foreground">Rep scorecards track depth, knee tracking, torso stack, hip centering, symmetry, shoulder stability, and tempo.</p>
                       </div>
-                      {squatEvidence?.totalReps ? <Badge className="w-fit bg-emerald-500/15 text-emerald-300">{squatEvidence.totalReps} scored reps</Badge> : null}
+                      {squatEvidence?.totalReps ? <Badge className="w-fit bg-primary/15 text-primary">{squatEvidence.totalReps} scored reps</Badge> : null}
                     </div>
                     {squatEvidence?.totalReps ? (
                       <div className="mt-4 grid gap-2 sm:grid-cols-4">
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-                          <p className="text-xs text-zinc-500">Average</p>
+                        <div className="rounded-xl border border-border bg-background/60 p-3">
+                          <p className="text-xs text-muted-foreground">Average</p>
                           <p className={cn("mt-1 text-xl font-semibold", text(squatEvidence.averageScore))}>{squatEvidence.averageScore}</p>
                         </div>
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-                          <p className="text-xs text-zinc-500">Best</p>
-                          <p className="mt-1 text-xl font-semibold text-emerald-300">Rep {squatEvidence.bestRep}</p>
+                        <div className="rounded-xl border border-border bg-background/60 p-3">
+                          <p className="text-xs text-muted-foreground">Best</p>
+                          <p className="mt-1 text-xl font-semibold text-primary">Rep {squatEvidence.bestRep}</p>
                         </div>
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-                          <p className="text-xs text-zinc-500">Worst</p>
-                          <p className="mt-1 text-xl font-semibold text-rose-300">Rep {squatEvidence.worstRep}</p>
+                        <div className="rounded-xl border border-border bg-background/60 p-3">
+                          <p className="text-xs text-muted-foreground">Worst</p>
+                          <p className="mt-1 text-xl font-semibold text-destructive">Rep {squatEvidence.worstRep}</p>
                         </div>
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-                          <p className="text-xs text-zinc-500">Reliability</p>
-                          <p className="mt-1 text-xl font-semibold text-cyan-300">{squatEvidence.reliabilityAverage}%</p>
+                        <div className="rounded-xl border border-border bg-background/60 p-3">
+                          <p className="text-xs text-muted-foreground">Reliability</p>
+                          <p className="mt-1 text-xl font-semibold text-primary">{squatEvidence.reliabilityAverage}%</p>
                         </div>
                       </div>
                     ) : null}
                     {squatRepScorecards.length ? (
-                      <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-                        <p className="mb-3 text-xs uppercase tracking-[0.24em] text-zinc-500">Squat rep heatmap</p>
+                      <div className="mt-4 overflow-x-auto rounded-xl border border-border bg-background/60 p-3">
+                        <p className="mb-3 text-xs uppercase tracking-[0.24em] text-muted-foreground">Squat rep heatmap</p>
                         <div className="grid min-w-[620px] gap-2" style={{ gridTemplateColumns: "80px repeat(7, minmax(70px, 1fr))" }}>
-                          <div className="text-xs text-zinc-500">Rep</div>
+                          <div className="text-xs text-muted-foreground">Rep</div>
                           {(["depth", "kneeTracking", "torsoStack", "hipCentering", "symmetry", "shoulderStability", "tempo"] as SquatMetricKey[]).map((key) => (
-                            <div key={key} className="truncate text-xs text-zinc-500">{getSquatMetricLabel(key)}</div>
+                            <div key={key} className="truncate text-xs text-muted-foreground">{getSquatMetricLabel(key)}</div>
                           ))}
                           {squatRepScorecards.map((rep) => (
                             <div key={`squat-rep-row-${rep.repNumber}`} className="contents">
-                              <div className="text-sm font-medium text-zinc-100">Rep {rep.repNumber}</div>
+                              <div className="text-sm font-medium text-foreground">Rep {rep.repNumber}</div>
                               {(["depth", "kneeTracking", "torsoStack", "hipCentering", "symmetry", "shoulderStability", "tempo"] as SquatMetricKey[]).map((key) => {
                                 const metric = rep.metrics[key];
                                 return (
-                                  <div key={`${rep.repNumber}-${key}`} className={cn("rounded-md border px-2 py-1 text-xs text-zinc-100", metricTone(metric.status))}>
+                                  <div key={`${rep.repNumber}-${key}`} className={cn("rounded-md border px-2 py-1 text-xs text-foreground", metricTone(metric.status))}>
                                     {metric.reliable ? metric.score : "n/a"}
                                   </div>
                                 );
@@ -2595,16 +2595,16 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                         </div>
                       </div>
                     ) : (
-                      <p className="mt-4 text-sm text-zinc-400">Squat scorecards will appear here after each completed rep.</p>
+                      <p className="mt-4 text-sm text-muted-foreground">Squat scorecards will appear here after each completed rep.</p>
                     )}
                   </div>
                 ) : null}
                 {liveIssues.length ? (
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Active issue history</p>
+                  <div className="rounded-2xl border border-border bg-card/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Active issue history</p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {liveIssues.map((issue) => (
-                        <Badge key={issue} variant="outline" className="border-zinc-700 text-zinc-200">
+                        <Badge key={issue} variant="outline" className="border-border text-foreground">
                           {issue}
                         </Badge>
                       ))}
@@ -2615,36 +2615,36 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
             </Card>
 
             {mode === "dance" ? (
-              <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
+              <Card className="border-border bg-background/70 text-foreground">
                 <CardHeader>
                   <CardTitle>Hip-hop routine sync</CardTitle>
-                  <CardDescription className="text-zinc-400">Packaged phrase checkpoints drive pose shape, groove bounce, timing, and transition scoring.</CardDescription>
+                  <CardDescription className="text-muted-foreground">Packaged phrase checkpoints drive pose shape, groove bounce, timing, and transition scoring.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                  <div className="rounded-2xl border border-border bg-card/60 p-4">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <p className="text-sm font-medium text-zinc-100">{danceRoutine?.name ?? "Loading routine"}</p>
-                      <Badge className="w-fit bg-fuchsia-500/15 text-fuchsia-200">{danceRoutine?.style === "hip_hop" ? "Hip-hop" : "Dance"}</Badge>
+                      <p className="text-sm font-medium text-foreground">{danceRoutine?.name ?? "Loading routine"}</p>
+                      <Badge className="w-fit bg-primary/15 text-primary">{danceRoutine?.style === "hip_hop" ? "Hip-hop" : "Dance"}</Badge>
                     </div>
-                    <p className="mt-1 text-sm text-zinc-400">{activeDanceCheckpoint?.step.cue ?? "Waiting for the first phrase."}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{activeDanceCheckpoint?.step.cue ?? "Waiting for the first phrase."}</p>
                   </div>
                   {danceTraining ? <DanceCoachSkeleton training={danceTraining} /> : null}
                   {danceComparison ? (
                     <>
                       <div className="grid gap-3 sm:grid-cols-4">
-                        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Shape</p><p className="mt-2 text-2xl font-semibold">{danceComparison.poseSimilarity}</p></div>
-                        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Timing</p><p className="mt-2 text-2xl font-semibold">{danceComparison.timingScore}</p></div>
-                        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Transition</p><p className="mt-2 text-2xl font-semibold">{danceComparison.transitionQuality}</p></div>
-                        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Reliability</p><p className="mt-2 text-2xl font-semibold">{danceComparison.reliability}%</p></div>
+                        <div className="rounded-2xl border border-border bg-card/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Shape</p><p className="mt-2 text-2xl font-semibold">{danceComparison.poseSimilarity}</p></div>
+                        <div className="rounded-2xl border border-border bg-card/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Timing</p><p className="mt-2 text-2xl font-semibold">{danceComparison.timingScore}</p></div>
+                        <div className="rounded-2xl border border-border bg-card/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Transition</p><p className="mt-2 text-2xl font-semibold">{danceComparison.transitionQuality}</p></div>
+                        <div className="rounded-2xl border border-border bg-card/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Reliability</p><p className="mt-2 text-2xl font-semibold">{danceComparison.reliability}%</p></div>
                       </div>
                       <div className="grid gap-3 sm:grid-cols-2">
                         {Object.values(danceComparison.metrics).map((metric) => (
                           <div key={metric.key} className={cn("rounded-xl border px-3 py-3", metricTone(metric.status))}>
                             <div className="flex items-start justify-between gap-3">
                               <div>
-                                <p className="text-sm font-medium text-zinc-100">{metric.label}</p>
-                                <p className="mt-1 text-xs text-zinc-400">{metric.detail}</p>
-                                {metric.target ? <p className="mt-1 text-[11px] text-zinc-500">Target: {metric.target}</p> : null}
+                                <p className="text-sm font-medium text-foreground">{metric.label}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">{metric.detail}</p>
+                                {metric.target ? <p className="mt-1 text-[11px] text-muted-foreground">Target: {metric.target}</p> : null}
                               </div>
                               <span className={cn("text-sm font-semibold", text(metric.score))}>{metric.reliable ? metric.score : "n/a"}</span>
                             </div>
@@ -2652,9 +2652,9 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                         ))}
                       </div>
                       {danceComparison.notes.length ? (
-                        <div className="rounded-2xl border border-fuchsia-500/25 bg-fuchsia-500/10 p-4">
-                          <p className="text-xs uppercase tracking-[0.24em] text-fuchsia-200/70">Primary hip-hop correction</p>
-                          <p className="mt-2 text-sm text-zinc-200">{danceComparison.notes[0]}</p>
+                        <div className="rounded-2xl border border-border bg-primary/10 p-4">
+                          <p className="text-xs uppercase tracking-[0.24em] text-primary">Primary hip-hop correction</p>
+                          <p className="mt-2 text-sm text-foreground">{danceComparison.notes[0]}</p>
                         </div>
                       ) : null}
                     </>
@@ -2662,12 +2662,12 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   {danceSegmentBreakdown.length ? (
                     <div className="space-y-2">
                       {danceSegmentBreakdown.map((segment) => (
-                        <div key={segment.id} className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                        <div key={segment.id} className="rounded-2xl border border-border bg-card/60 p-4">
                           <div className="flex items-center justify-between">
-                            <p className="font-medium text-zinc-100">{segment.label}</p>
-                            <Badge className="bg-zinc-100 text-zinc-950">Overall {segment.overall}</Badge>
+                            <p className="font-medium text-foreground">{segment.label}</p>
+                            <Badge className="bg-primary text-primary-foreground">Overall {segment.overall}</Badge>
                           </div>
-                          <p className="mt-2 text-sm text-zinc-400">Timing {segment.timing} • Transition {segment.transition}</p>
+                          <p className="mt-2 text-sm text-muted-foreground">Timing {segment.timing} • Transition {segment.transition}</p>
                         </div>
                       ))}
                     </div>
@@ -2677,35 +2677,35 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
             ) : null}
 
             {(summary || summaryInsights.length || summaryPractice.length || topMistakes.length || correctivePlan.length) ? (
-              <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
+              <Card className="border-border bg-background/70 text-foreground">
                 <CardHeader>
                   <CardTitle>Post-session review</CardTitle>
-                  <CardDescription className="text-zinc-400">Grounded in saved issue history, frame-quality stats, and post-set aggregates.</CardDescription>
+                  <CardDescription className="text-muted-foreground">Grounded in saved issue history, frame-quality stats, and post-set aggregates.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {summary ? <p className="text-sm leading-6 text-zinc-200">{summary}</p> : null}
+                  {summary ? <p className="text-sm leading-6 text-foreground">{summary}</p> : null}
                   <div className="grid gap-3 md:grid-cols-2">
-                    <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4">
-                      <p className="text-xs uppercase tracking-[0.24em] text-emerald-200/70">What improved</p>
-                      <p className="mt-2 text-sm text-zinc-200">
+                    <div className="rounded-2xl border border-border bg-primary/10 p-4">
+                      <p className="text-xs uppercase tracking-[0.24em] text-primary">What improved</p>
+                      <p className="mt-2 text-sm text-foreground">
                         {summaryInsights[0] ?? (analysis.positives[0] || "The session is saved, so the coach has stronger evidence for the next recommendation.")}
                       </p>
                     </div>
                     <div className="rounded-2xl border border-rose-500/25 bg-rose-500/10 p-4">
-                      <p className="text-xs uppercase tracking-[0.24em] text-rose-200/70">What failed most</p>
-                      <p className="mt-2 text-sm text-zinc-200">
+                      <p className="text-xs uppercase tracking-[0.24em] text-destructive">What failed most</p>
+                      <p className="mt-2 text-sm text-foreground">
                         {topMistakes[0]?.mistake ?? summaryPractice[0] ?? sessionFocusMetric?.label ?? "No repeated failed metric was detected."}
                       </p>
                     </div>
-                    <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-4">
-                      <p className="text-xs uppercase tracking-[0.24em] text-cyan-200/70">Next action</p>
-                      <p className="mt-2 text-sm text-zinc-200">
+                    <div className="rounded-2xl border border-border bg-primary/10 p-4">
+                      <p className="text-xs uppercase tracking-[0.24em] text-primary">Next action</p>
+                      <p className="mt-2 text-sm text-foreground">
                         {postSessionAgent?.postSessionNextAction?.nextAction ?? agentReport?.postSessionNextAction?.nextAction ?? summaryPractice[0] ?? "Repeat this module once more with one correction focus."}
                       </p>
                     </div>
                     <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4">
-                      <p className="text-xs uppercase tracking-[0.24em] text-amber-200/70">Achievement progress</p>
-                      <p className="mt-2 text-sm text-zinc-200">
+                      <p className="text-xs uppercase tracking-[0.24em] text-warning">Achievement progress</p>
+                      <p className="mt-2 text-sm text-foreground">
                         {(postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement)
                           ? `${(postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement)?.name}: ${(postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement)?.progress}/${(postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement)?.threshold}. ${(postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement)?.nextAction}`
                           : "Complete more sessions to open the next achievement chase."}
@@ -2713,7 +2713,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-100" onClick={() => {
+                    <Button size="sm" variant="outline" className="border-border bg-card text-foreground" onClick={() => {
                       reset();
                       setSummary("");
                       setSummaryInsights([]);
@@ -2724,19 +2724,19 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                       <RotateCcw className="h-4 w-4" />
                       Repeat session
                     </Button>
-                    <Button size="sm" className="bg-cyan-500 text-white hover:bg-cyan-600" onClick={() => {
+                    <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary" onClick={() => {
                       window.location.href = (postSessionAgent?.primarySessionRecommendation ?? agentReport?.primarySessionRecommendation)?.href ?? (mode === "dance" ? "/coach/dance" : "/coach/workout");
                     }}>
                       <Target className="h-4 w-4" />
                       Recommended next
                     </Button>
-                    <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-100" onClick={() => {
+                    <Button size="sm" variant="outline" className="border-border bg-card text-foreground" onClick={() => {
                       window.location.href = "/coach/chat";
                     }}>
                       <Brain className="h-4 w-4" />
                       Ask coach
                     </Button>
-                    <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-100" onClick={async () => {
+                    <Button size="sm" variant="outline" className="border-border bg-card text-foreground" onClick={async () => {
                       const achievement = postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement;
                       const report = [
                         summary,
@@ -2757,11 +2757,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                     </Button>
                   </div>
                   {exerciseId === "bicep_curl" && curlEvidence?.totalReps ? (
-                    <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-4">
+                    <div className="rounded-2xl border border-border bg-primary/10 p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div>
-                          <p className="text-xs uppercase tracking-[0.24em] text-cyan-200/70">Teacher report card</p>
-                          <p className="mt-2 text-sm text-zinc-200">
+                          <p className="text-xs uppercase tracking-[0.24em] text-primary">Teacher report card</p>
+                          <p className="mt-2 text-sm text-foreground">
                             {curlEvidence.totalReps} reps, average {curlEvidence.averageScore}, best rep {curlEvidence.bestRep}, worst rep {curlEvidence.worstRep}.{" "}
                             {curlEvidence.recurringFailedMetrics.length ? `Practice ${curlEvidence.recurringFailedMetrics[0].toLowerCase()} next.` : "No repeated failed metric."}
                           </p>
@@ -2769,7 +2769,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                         <Button
                           size="sm"
                           variant="outline"
-                          className="border-cyan-700/60 bg-zinc-950/70 text-cyan-100"
+                          className="border-border bg-background/70 text-primary"
                           onClick={async () => {
                             if (!teacherReport) return;
                             try {
@@ -2789,23 +2789,23 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   ) : null}
                   {summaryInsights.length ? (
                     <div>
-                      <p className="mb-2 text-xs uppercase tracking-[0.24em] text-zinc-500">Key insights</p>
+                      <p className="mb-2 text-xs uppercase tracking-[0.24em] text-muted-foreground">Key insights</p>
                       <div className="space-y-2">
                         {summaryInsights.map((item) => (
-                          <div key={item} className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200">{item}</div>
+                          <div key={item} className="rounded-xl border border-border bg-card/60 px-3 py-2 text-sm text-foreground">{item}</div>
                         ))}
                       </div>
                     </div>
                   ) : null}
                   {topMistakes.length ? (
                     <div>
-                      <p className="mb-2 text-xs uppercase tracking-[0.24em] text-zinc-500">Top mistakes</p>
+                      <p className="mb-2 text-xs uppercase tracking-[0.24em] text-muted-foreground">Top mistakes</p>
                       <div className="space-y-2">
                         {topMistakes.map((item) => (
-                          <div key={item.mistake} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
-                            <p className="font-medium text-zinc-100">{item.mistake}</p>
-                            <p className="mt-1 text-sm text-zinc-400">{item.whyItHurtsPerformance}</p>
-                            <p className="mt-2 text-sm text-zinc-200">{item.exactFix}</p>
+                          <div key={item.mistake} className="rounded-xl border border-border bg-card/60 p-3">
+                            <p className="font-medium text-foreground">{item.mistake}</p>
+                            <p className="mt-1 text-sm text-muted-foreground">{item.whyItHurtsPerformance}</p>
+                            <p className="mt-2 text-sm text-foreground">{item.exactFix}</p>
                           </div>
                         ))}
                       </div>
@@ -2813,12 +2813,12 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   ) : null}
                   {correctivePlan.length ? (
                     <div>
-                      <p className="mb-2 text-xs uppercase tracking-[0.24em] text-zinc-500">5 minute corrective block</p>
+                      <p className="mb-2 text-xs uppercase tracking-[0.24em] text-muted-foreground">5 minute corrective block</p>
                       <div className="space-y-2">
                         {correctivePlan.map((item) => (
-                          <div key={`${item.minuteRange}-${item.drill}`} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
-                            <p className="font-medium text-zinc-100">{item.minuteRange} • {item.drill}</p>
-                            <p className="mt-1 text-sm text-zinc-300">{item.focusCue}</p>
+                          <div key={`${item.minuteRange}-${item.drill}`} className="rounded-xl border border-border bg-card/60 p-3">
+                            <p className="font-medium text-foreground">{item.minuteRange} • {item.drill}</p>
+                            <p className="mt-1 text-sm text-foreground">{item.focusCue}</p>
                           </div>
                         ))}
                       </div>
@@ -2826,10 +2826,10 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   ) : null}
                   {summaryPractice.length ? (
                     <div>
-                      <p className="mb-2 text-xs uppercase tracking-[0.24em] text-zinc-500">Next session focus</p>
+                      <p className="mb-2 text-xs uppercase tracking-[0.24em] text-muted-foreground">Next session focus</p>
                       <div className="space-y-2">
                         {summaryPractice.map((item) => (
-                          <div key={item} className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200">{item}</div>
+                          <div key={item} className="rounded-xl border border-border bg-card/60 px-3 py-2 text-sm text-foreground">{item}</div>
                         ))}
                       </div>
                     </div>
@@ -2840,20 +2840,20 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
 
             {/* Visual Set Replay HUD */}
             {!running && landmarksHistoryRef.current.length > 0 && (
-              <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100 mt-4">
+              <Card className="border-border bg-background/70 text-foreground mt-4">
                 <CardHeader className="pb-3 flex flex-row items-start justify-between space-y-0">
                   <div className="mr-4">
-                    <CardTitle className="text-sm font-semibold tracking-wider text-zinc-300">VISUAL SET REPLAY HUD</CardTitle>
-                    <CardDescription className="text-zinc-400">Scrub the timeline to analyze your skeleton coordinates and joint metrics frame-by-frame.</CardDescription>
+                    <CardTitle className="text-sm font-semibold tracking-wider text-foreground">VISUAL SET REPLAY HUD</CardTitle>
+                    <CardDescription className="text-muted-foreground">Scrub the timeline to analyze your skeleton coordinates and joint metrics frame-by-frame.</CardDescription>
                   </div>
-                  <div className="flex items-center gap-1 rounded-full border border-zinc-800 bg-zinc-950/80 p-0.5 backdrop-blur shrink-0 mt-0.5">
+                  <div className="flex items-center gap-1 rounded-full border border-border bg-background/80 p-0.5 backdrop-blur shrink-0 mt-0.5">
                     <button
                       onClick={() => setHudMode("2d")}
                       className={cn(
                         "rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider uppercase transition-all duration-300 cursor-pointer",
                         hudMode === "2d"
-                          ? "bg-zinc-100 text-zinc-900 shadow-sm"
-                          : "text-zinc-400 hover:text-zinc-200"
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
                       )}
                     >
                       2D HUD
@@ -2863,8 +2863,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                       className={cn(
                         "rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider uppercase transition-all duration-300 cursor-pointer",
                         hudMode === "3d"
-                          ? "bg-cyan-500 text-white shadow-[0_0_10px_rgba(6,182,212,0.4)]"
-                          : "text-zinc-400 hover:text-zinc-200"
+                          ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(6,182,212,0.4)]"
+                          : "text-muted-foreground hover:text-foreground"
                       )}
                     >
                       3D HUD
@@ -2872,16 +2872,16 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="relative aspect-video w-full overflow-hidden rounded-[20px] border border-zinc-800 bg-black shadow-inner">
+                  <div className="relative aspect-video w-full overflow-hidden rounded-[20px] border border-border bg-black shadow-inner">
                     <canvas ref={replayOverlayRef} className="absolute inset-0 h-full w-full z-20 pointer-events-none" />
                     {hudMode === "3d" && (
                       <canvas ref={replayThreeCanvasRef} className="absolute inset-0 h-full w-full z-10 pointer-events-none" />
                     )}
                   </div>
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs text-zinc-300">
+                    <div className="flex items-center justify-between text-xs text-foreground">
                       <span>Frame {replayFrameIndex + 1} of {landmarksHistoryRef.current.length}</span>
-                      <span>Rep Phase: <span className="font-semibold text-cyan-300 uppercase">{landmarksHistoryRef.current[replayFrameIndex]?.analysis.phase ?? "N/A"}</span></span>
+                      <span>Rep Phase: <span className="font-semibold text-primary uppercase">{landmarksHistoryRef.current[replayFrameIndex]?.analysis.phase ?? "N/A"}</span></span>
                     </div>
                     <input
                       type="range"
@@ -2889,7 +2889,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                       max={landmarksHistoryRef.current.length - 1}
                       value={replayFrameIndex}
                       onChange={(e) => setReplayFrameIndex(Number(e.target.value))}
-                      className="w-full accent-cyan-500 bg-zinc-800 h-2 rounded-lg cursor-pointer transition-all"
+                      className="w-full accent-cyan-500 bg-secondary h-2 rounded-lg cursor-pointer transition-all"
                     />
                   </div>
                 </CardContent>

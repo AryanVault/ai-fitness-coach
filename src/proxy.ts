@@ -1,14 +1,15 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest, type NextFetchEvent } from "next/server";
 import { isClerkAuthEnabled, isDemoModeEnabled, isLegacyAuthEnabled } from "@/lib/env";
-const protectedPrefixes = ["/dashboard", "/review-lab", "/profiles", "/coach", "/workouts", "/workout-plans", "/nutrition", "/progress", "/achievements", "/settings", "/onboarding"];
+import { isProtectedAppPath } from "@/lib/auth/navigation";
 function responseFor(request: NextRequest, signedIn: boolean) {
   const path = request.nextUrl.pathname;
   const requestHeaders = new Headers(request.headers);
   const requestId = crypto.randomUUID();
   requestHeaders.set("x-request-id", requestId);
-  const protectedPage = path !== "/review-lab/methodology" && protectedPrefixes.some(p => path === p || path.startsWith(p + "/"));
-  const response = protectedPage && !signedIn ? (() => { const url = new URL(isClerkAuthEnabled() ? "/sign-in" : "/login", request.url); url.searchParams.set("next", path); return NextResponse.redirect(url); })() : NextResponse.next({ request: { headers: requestHeaders } });
+  const protectedPage = isProtectedAppPath(path);
+  const clerkAlias = isClerkAuthEnabled() && !isLegacyAuthEnabled() && (path === "/login" || path === "/signup");
+  const response = clerkAlias ? (() => { const url = new URL(path === "/login" ? "/sign-in" : "/sign-up", request.url); url.search = request.nextUrl.search; return NextResponse.redirect(url); })() : protectedPage && !signedIn ? (() => { const url = new URL(isClerkAuthEnabled() ? "/sign-in" : "/login", request.url); url.searchParams.set("next", path + request.nextUrl.search); return NextResponse.redirect(url); })() : NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("X-Request-ID", requestId);
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");

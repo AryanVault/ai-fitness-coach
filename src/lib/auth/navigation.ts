@@ -1,3 +1,10 @@
+/** Shared route boundary for server redirects and expired client sessions. */
+const privatePages = ["/dashboard", "/review-lab", "/profiles", "/coach", "/workouts", "/workout-plans", "/nutrition", "/progress", "/recovery", "/achievements", "/settings", "/onboarding"];
+
+export function isProtectedAppPath(path: string) {
+  return path !== "/review-lab/methodology" && privatePages.some(prefix => path === prefix || path.startsWith(`${prefix}/`));
+}
+
 /** Accept only local absolute paths from return-to query parameters. */
 export function safeNextPath(value: string | null, fallback = "/dashboard") {
   if (!value || !value.startsWith("/") || value.startsWith("//") || /[\\\u0000-\u001f\u007f]/.test(value) || /^\/%(?:2f|5c)/i.test(value)) return fallback;

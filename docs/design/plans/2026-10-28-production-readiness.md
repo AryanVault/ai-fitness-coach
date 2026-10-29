@@ -27,33 +27,37 @@
 
 Files: `src/proxy.ts`, `src/app/dashboard/page.tsx`, `src/app/recovery/page.tsx`, focused browser tests and any focused shared request helper.
 
-- [ ] Reproduce missing recovery redirect and failed load/save behavior with targeted tests.
-- [ ] Add error, retry and finally paths; preserve existing successful response contracts.
-- [ ] Verify unauthenticated navigation, HTTP errors, rejected fetch and successful retry.
+- [x] Reproduce missing recovery redirect and failed load/save behavior with targeted tests.
+- [x] Add error, retry and finally paths; preserve existing successful response contracts.
+- [x] Verify unauthenticated navigation, HTTP errors, rejected fetch and successful retry.
 
 ## Task 2: Release configuration
 
 Files: `next.config.ts`, `Dockerfile`, `docker-compose.yml`, `package.json`, lockfile and `.github/workflows/ci.yml` as justified by evidence.
 
-- [ ] Inspect dependency audit and deployment build/runtime environment consistency.
-- [ ] Apply bounded fixes with tests or build checks; never bypass environment gates.
-- [ ] Verify production build and configuration. Record externally blocked checks honestly.
+- [x] Inspect dependency audit and deployment build/runtime environment consistency.
+- [x] Apply bounded fixes with tests or build checks; never bypass environment gates.
+- [x] Verify production build and configuration. Record externally blocked checks honestly.
 
 ## Task 3: Movement visual system
 
 Files: `src/app/page.tsx`, `src/app/globals.css`, `src/app/layout.tsx`, `src/components/layout/AppLayout.tsx`, new `src/components/brand/` movement/mark components and public font assets.
 
-- [ ] Render and select a properly licensed self-hosted display face.
-- [ ] Build a responsive, working movement study and truthful public content.
-- [ ] Apply coherent design tokens and shell; accessible controls, safe storage, skip link.
-- [ ] Replace hidden entrance defaults across app pages; preserve motion with visible fallbacks.
-- [ ] Verify controls, mobile overflow, contrast, reduced motion and no-JS content.
+- [x] Render and select a properly licensed self-hosted display face.
+- [x] Build a responsive, working movement study and truthful public content.
+- [x] Apply coherent design tokens and shell; accessible controls, safe storage, skip link.
+- [x] Replace hidden entrance defaults across app pages; preserve motion with visible fallbacks.
+- [x] Verify controls, mobile overflow, contrast, reduced motion and no-JS content.
 
 ## Task 4: Integrated verification and handover
 
 Files: release evidence document, README, targeted tests.
 
-- [ ] Run lint, typecheck, unit/model tests, migration metadata and production build.
-- [ ] Run available PostgreSQL integration and browser tests, then production smoke.
-- [ ] Inspect whole diff and conduct the user's point-by-point UI review; fix findings.
-- [ ] Record evidence, exact external requirements, and local run instructions.
+- [x] Run lint, typecheck, unit/model tests, migration metadata and production build.
+- [x] Run available PostgreSQL integration and browser tests, then production smoke.
+- [x] Inspect whole diff and conduct the user's point-by-point UI review; fix findings.
+- [x] Record evidence, exact external requirements, and local run instructions.
+
+## Handover
+
+All implementation tasks completed. See `docs/validation-2026-10-29.md` for measured results and the external release gates. The application is prepared for staging; live production has not been provisioned or opened.

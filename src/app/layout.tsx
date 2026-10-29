@@ -1,25 +1,23 @@
 import type { Metadata } from "next";
-import { Archivo, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { AppLayout } from "@/components/layout/AppLayout";
 import ErrorReporter from "@/components/ErrorReporter";
 import { AuthProvider } from "@/components/auth/AuthProvider";
 import { Toaster } from "sonner";
 
-const archivo = Archivo({
-  subsets: ["latin"],
-  variable: "--font-geist-sans",
-  weight: ["400", "500", "600", "700", "800", "900"],
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-geist-mono",
+const sporting = localFont({
+  src: [
+    { path: "../../public/fonts/Sporting_Grotesque-Regular_web.woff2", weight: "400" },
+    { path: "../../public/fonts/Sporting_Grotesque-Bold_web.woff2", weight: "700" },
+  ],
+  variable: "--font-display",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "FitCoach AI - Your Personal Fitness, Dance & Diet Coach",
-  description: "AI-powered fitness coaching with real-time form analysis, personalized workout plans, dance training, and nutrition guidance.",
+  title: { default: "FitCoach - Move with intent", template: "%s | FitCoach" },
+  description: "Build your fitness practice with camera-based movement cues, workout plans, a starter dance course, nutrition and recovery check-ins.",
   keywords: ["fitness", "AI coach", "workout", "dance", "nutrition", "personal trainer"],
 };
 
@@ -30,7 +28,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" data-scroll-behavior="smooth" suppressHydrationWarning>
-      <body className={`${archivo.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
+      <body className={`${sporting.variable} font-sans antialiased`}>
+        <a href="#main-content" className="skip-link">Skip to content</a>
         <AuthProvider>
           <ErrorReporter />
           <AppLayout>{children}</AppLayout>

@@ -103,6 +103,14 @@ describe("coach agent decision engine", () => {
     expect(plan.todayPlan.evidenceChips).toContain("Squat Foundation: 84%");
   });
 
+  it("marks missing recovery data as an estimated baseline", async () => {
+    const { buildReadinessReport } = await import("@/lib/server/coach-agent");
+    const report = buildReadinessReport({ sessions: [], failedMetrics: [] });
+    expect(report.hasCheckIn).toBe(false);
+    expect(report.drivers).toContain("sleep baseline estimated");
+    expect(report.recommendation).toMatch(/check-in/i);
+  });
+
   it("low recovery check-ins reduce readiness and recommend recovery", async () => {
     const { buildReadinessReport } = await import("@/lib/server/coach-agent");
     const readiness = buildReadinessReport({
@@ -120,6 +128,7 @@ describe("coach agent decision engine", () => {
     });
 
     expect(readiness.score).toBeLessThan(55);
+    expect(readiness.hasCheckIn).toBe(true);
     expect(readiness.label).toBe("Recover");
     expect(readiness.recommendation).toMatch(/mobility|recovery/i);
   });

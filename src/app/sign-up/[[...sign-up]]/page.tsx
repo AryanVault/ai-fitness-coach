@@ -1,27 +1,43 @@
-"use client";
-
 import Link from "next/link";
 import { SignUp } from "@clerk/nextjs";
-import { Card, CardContent } from "@/components/ui/card";
+import { safeNextPath } from "@/lib/auth/navigation";
+import { BrandMark } from "@/components/brand/BrandMark";
 
-export default function ClerkSignUpPage() {
-  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
-    return (
-      <div className="performance-shell flex min-h-screen items-center justify-center p-4">
-        <Card className="max-w-md">
-          <CardContent className="space-y-3 pt-6">
-            <h1 className="text-2xl font-black uppercase">Clerk is not configured</h1>
-            <p className="text-sm text-muted-foreground">Add Clerk keys to `.env.local`, or use the existing account creation flow.</p>
-            <Link href="/signup" className="text-primary">Go to signup</Link>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+export const metadata = { title: "Create an account" };
 
+export default async function AuthPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string | string[] }>;
+}) {
+  const params = await searchParams;
+  const next = safeNextPath(
+    typeof params.next === "string" ? params.next : null,
+    "/onboarding",
+  );
+  const alternate = `/sign-in?next=${encodeURIComponent(next)}`;
   return (
-    <div className="performance-shell flex min-h-screen items-center justify-center p-4">
-      <SignUp signInUrl="/sign-in" fallbackRedirectUrl="/onboarding" />
+    <div className="flex min-h-screen flex-col items-center justify-center gap-8 px-4 py-12">
+      <Link href="/" className="studio-brand" aria-label="FitCoach home">
+        <BrandMark />
+        FitCoach
+      </Link>
+      {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? (
+        <SignUp signInUrl={alternate} forceRedirectUrl={next} />
+      ) : (
+        <div className="max-w-sm space-y-4 text-center">
+          <h1 className="text-2xl">Start your practice.</h1>
+          <p className="text-sm text-muted-foreground">
+            Create an account to save your practice and progress.
+          </p>
+          <Link
+            className="studio-action"
+            href={`/signup?next=${encodeURIComponent(next)}`}
+          >
+            Continue
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

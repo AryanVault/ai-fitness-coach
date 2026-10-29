@@ -1,19 +1,17 @@
 import type { NextConfig } from "next";
-import path from "node:path";
-
-const LOADER = path.resolve(__dirname, 'src/visual-edits/component-tagger-loader.js');
 
 const nextConfig: NextConfig = {
+  output: "standalone",
+  poweredByHeader: false,
+  async headers() {
+    if (process.env.NODE_ENV !== "production") return [];
+    return [{ source: "/:path*", headers: [
+      { key: "X-Frame-Options", value: "DENY" },
+      { key: "Content-Security-Policy", value: "frame-ancestors 'none'; base-uri 'self'; object-src 'none'" },
+    ] }];
+  },
   allowedDevOrigins: ["127.0.0.1"],
   outputFileTracingRoot: __dirname,
-  turbopack: {
-    rules: {
-      "*.{jsx,tsx}": {
-        loaders: [LOADER]
-      }
-    }
-  }
 };
 
 export default nextConfig;
-// Orchids restart: 1759138773779

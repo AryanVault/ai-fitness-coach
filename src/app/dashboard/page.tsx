@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
-import { Activity, AlertCircle, Award, BatteryCharging, Bell, Bot, Calendar, CheckCircle2, Clock, Dumbbell, Flame, HeartPulse, LineChart, MessageSquare, Music2, Play, Sparkles, Target, TrendingUp, Trophy, Users } from "lucide-react";
+import { Activity, Award, BatteryCharging, Bell, Bot, Calendar, CheckCircle2, Clock, Dumbbell, Flame, HeartPulse, LineChart, MessageSquare, Music2, Play, Sparkles, Target, TrendingUp, Trophy, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { DashboardSummary } from "@/lib/app-types";
 import { useUserProfile } from "@/hooks/useUserProfile";
+import { requestJson } from "@/lib/client/request";
 
 const emptySummary: DashboardSummary = {
   streak: 0,
@@ -83,6 +83,7 @@ type CoachAgentReport = {
     planAdjustment: string;
   };
   readiness: {
+    hasCheckIn?: boolean;
     score: number;
     label: string;
     recommendation: string;
@@ -148,63 +149,90 @@ export default function DashboardPage() {
   const [danceCourse, setDanceCourse] = useState<DanceCourseCard | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [error, setError] = useState<string | null>(null);
+  const [agentError, setAgentError] = useState(false);
+  const [danceError, setDanceError] = useState(false);
+  const [agentLoading, setAgentLoading] = useState(true);
+  const [summaryAttempt, setSummaryAttempt] = useState(0);
+  const [agentAttempt, setAgentAttempt] = useState(0);
+  const [danceAttempt, setDanceAttempt] = useState(0);
+
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     const load = async () => {
+      setLoading(true);
+      setError(null);
       try {
-        const response = await fetch("/api/dashboard", { credentials: "include" });
-        if (!response.ok) {
-          if (!cancelled) {
-            setSummary(emptySummary);
-          }
-          return;
-        }
-        const data = await response.json();
+        const data = await requestJson<DashboardSummary>("/api/dashboard", { credentials: "include", signal: controller.signal });
+        if (!data || typeof data.totalWorkouts !== "number") throw new Error("Invalid dashboard response");
         if (!cancelled) {
           setSummary({
             ...emptySummary,
             ...data,
-            recentSessions: Array.isArray(data?.recentSessions) ? data.recentSessions : [],
-            weightTrend: Array.isArray(data?.weightTrend) ? data.weightTrend : [],
+            recentSessions: Array.isArray(data.recentSessions) ? data.recentSessions : [],
+            weightTrend: Array.isArray(data.weightTrend) ? data.weightTrend : [],
           });
         }
-        const agentResponse = await fetch("/api/coach/agent", { credentials: "include" });
-        if (agentResponse.ok) {
-          const agentData = await agentResponse.json();
-          if (!cancelled) setAgent(agentData);
-        }
-        const danceResponse = await fetch("/api/dance/course", { credentials: "include" });
-        if (danceResponse.ok) {
-          const danceData = await danceResponse.json();
-          if (!cancelled) setDanceCourse(danceData.course ?? null);
-        }
+      } catch {
+        if (!cancelled) setError("Could not load your dashboard. Your saved activity is unavailable right now.");
       } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        if (!cancelled) setLoading(false);
       }
     };
     void load();
-    return () => {
-      cancelled = true;
+    return () => { cancelled = true; controller.abort(); };
+  }, [summaryAttempt]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    const load = async () => {
+      setAgentLoading(true);
+      setAgentError(false);
+      try {
+        const data = await requestJson<CoachAgentReport>("/api/coach/agent", { credentials: "include", signal: controller.signal });
+        if (!data?.todayPlan || !data?.readiness) throw new Error("Invalid coach response");
+        if (!cancelled) setAgent(data);
+      } catch {
+        if (!cancelled) { setAgent(null); setAgentError(true); }
+      } finally {
+        if (!cancelled) setAgentLoading(false);
+      }
     };
-  }, []);
+    void load();
+    return () => { cancelled = true; controller.abort(); };
+  }, [agentAttempt]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    const load = async () => {
+      setDanceError(false);
+      try {
+        const data = await requestJson<{ course: DanceCourseCard | null }>("/api/dance/course", { credentials: "include", signal: controller.signal });
+        if (!data || !("course" in data)) throw new Error("Invalid dance response");
+        if (!cancelled) setDanceCourse(data.course);
+      } catch {
+        if (!cancelled) { setDanceCourse(null); setDanceError(true); }
+      }
+    };
+    void load();
+    return () => { cancelled = true; controller.abort(); };
+  }, [danceAttempt]);
 
   const name = profile?.name?.split(" ")[0] || "Athlete";
-  const firstTime = !loading && summary.totalWorkouts === 0;
+  const firstTime = !loading && !error && summary.totalWorkouts === 0;
   const communityLeaderboard = summary.communityLeaderboard ?? [];
   const featuredAchievements = summary.featuredAchievements ?? [];
-  const bodyBatteryAverage = agent?.bodyBattery?.length
-    ? Math.round(agent.bodyBattery.reduce((sum, item) => sum + item.energy, 0) / agent.bodyBattery.length)
-    : 0;
+
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6 lg:p-8">
-      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <Badge className="mb-3">Daily readiness loop</Badge>
-          <h1 className="text-3xl font-black uppercase leading-none md:text-5xl">
-            Welcome back, <span className="gradient-text">{name}</span>
+          <h1 className="text-3xl font-black leading-tight md:text-5xl">
+            Welcome back, {name}
           </h1>
           <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
             {profile?.goals?.length ? `Current focus: ${profile.goals.map((goal) => goal.replace(/_/g, " ")).join(", ")}` : "Complete onboarding to personalize your coach."}
@@ -212,7 +240,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex gap-2">
           <Link href="/coach/chat">
-            <Button variant="outline" className="gap-2">
+            <Button variant="ghost" className="gap-2">
               <MessageSquare className="h-4 w-4" />
               Ask AI Coach
             </Button>
@@ -224,13 +252,34 @@ export default function DashboardPage() {
             </Button>
           </Link>
         </div>
-      </motion.div>
+      </div>
 
-      {loading ? (
+      {error ? (
+        <div role="alert" className="space-y-3 rounded-lg bg-muted p-5">
+          <p className="text-sm">{error}</p>
+          <Button onClick={() => setSummaryAttempt(attempt => attempt + 1)}>Retry dashboard</Button>
+        </div>
+      ) : null}
+
+      {!loading && !error && (agentError || danceError) ? (
+        <div className="space-y-4 rounded-lg bg-muted p-5">
+          {agentError ? <div className="flex flex-wrap items-center gap-3">
+            <p role="status" className="text-sm">Coach recommendations are unavailable.</p>
+            <Button variant="ghost" onClick={() => setAgentAttempt(attempt => attempt + 1)}>Retry coach recommendations</Button>
+          </div> : null}
+          {danceError ? <div className="flex flex-wrap items-center gap-3">
+            <p role="status" className="text-sm">Dance course progress is unavailable.</p>
+            <Button variant="ghost" onClick={() => setDanceAttempt(attempt => attempt + 1)}>Retry dance progress</Button>
+          </div> : null}
+        </div>
+      ) : null}
+
+      {!error ? <>
+      {loading || agentLoading ? (
         <Card className="border-primary/20 bg-primary/5">
           <CardContent className="grid gap-4 pt-6 lg:grid-cols-[1.2fr_0.8fr]">
             <div>
-              <Badge className="mb-3">Building coach plan</Badge>
+              <p role="status" className="mb-3 text-sm">{loading ? "Loading your dashboard" : "Loading coach recommendations"}</p>
               <div className="h-7 w-56 animate-pulse rounded bg-muted" />
               <div className="mt-3 h-4 w-full max-w-xl animate-pulse rounded bg-muted" />
             </div>
@@ -241,7 +290,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       ) : agent ? (
-        <Card className="overflow-hidden border-primary/25 bg-[linear-gradient(135deg,color-mix(in_oklch,var(--primary)_10%,transparent),color-mix(in_oklch,var(--card)_92%,transparent)_44%,color-mix(in_oklch,var(--accent)_9%,transparent))]">
+        <Card>
           <CardContent className="grid gap-5 pt-6 lg:grid-cols-[1.35fr_0.65fr]">
             <div>
               <div className="flex flex-wrap items-center gap-2">
@@ -249,7 +298,7 @@ export default function DashboardPage() {
                 <Badge variant="outline" className="capitalize">{agent.preSessionBrief.priority}</Badge>
               </div>
               <h2 className="mt-3 max-w-2xl text-3xl font-black uppercase leading-[0.95] md:text-5xl">
-                {firstTime ? "Your first move is a short coached baseline." : agent.primarySessionRecommendation.label}
+                {firstTime ? "Start with one set." : agent.primarySessionRecommendation.label}
               </h2>
               <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{agent.primarySessionRecommendation.reason}</p>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -265,14 +314,14 @@ export default function DashboardPage() {
                   </Button>
                 </Link>
                 <Link href={agent.todayPlan.secondaryHref}>
-                  <Button variant="outline" className="w-full gap-2 sm:w-auto">
+                  <Button variant="ghost" className="w-full gap-2 sm:w-auto">
                     <Target className="h-4 w-4" />
                     {agent.todayPlan.secondaryAction}
                   </Button>
                 </Link>
               </div>
             </div>
-            <div className="space-y-3 rounded-lg border border-border/70 bg-background/55 p-4 backdrop-blur">
+            <div className="space-y-3 rounded-lg bg-background p-4">
               <div className="flex items-start gap-3">
                 <CheckCircle2 className="mt-0.5 h-5 w-5 text-primary" />
                 <div>
@@ -294,22 +343,7 @@ export default function DashboardPage() {
             </div>
           </CardContent>
         </Card>
-      ) : (
-        <Card className="border-amber-500/20 bg-amber-500/10">
-          <CardContent className="flex flex-col gap-3 pt-6 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="mt-0.5 h-5 w-5 text-amber-600" />
-              <div>
-                <p className="font-medium">Coach memory is not ready yet</p>
-                <p className="text-sm text-muted-foreground">Start one short session and the guided plan will personalize from your scorecards.</p>
-              </div>
-            </div>
-            <Link href="/coach/workout">
-              <Button variant="outline">Start first session</Button>
-            </Link>
-          </CardContent>
-        </Card>
-      )}
+      ) : null}
 
       {agent ? (
         <div className="grid gap-4 xl:grid-cols-[1.05fr_1.25fr_0.7fr]">
@@ -317,27 +351,27 @@ export default function DashboardPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <HeartPulse className="h-5 w-5 text-primary" />
-                Readiness
+                Estimated readiness
               </CardTitle>
-              <CardDescription>Sleep, recovery debt, recent load, and weak metrics decide the day.</CardDescription>
+              <CardDescription>A planning estimate from check-ins and recorded activity, not a wearable measurement.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex items-end justify-between gap-4">
                 <div>
-                  <p className="text-6xl font-black leading-none text-primary">{agent.readiness.score}</p>
-                  <p className="mt-2 text-sm font-semibold uppercase text-muted-foreground">{agent.readiness.label}</p>
+                  <p className="text-6xl font-black leading-none text-primary">{agent.readiness.hasCheckIn ? agent.readiness.score : "—"}</p>
+                  <p className="mt-2 text-sm font-semibold uppercase text-muted-foreground">{agent.readiness.hasCheckIn ? agent.readiness.label : "No check-in yet"}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-sm text-muted-foreground">Recovery debt</p>
-                  <p className="text-2xl font-black">{agent.readiness.recoveryDebt}</p>
+                  <p className="text-2xl font-black">{agent.readiness.hasCheckIn ? agent.readiness.recoveryDebt : "—"}</p>
                 </div>
               </div>
-              <div className="mt-5 h-2 rounded-full bg-muted">
+              {agent.readiness.hasCheckIn ? <div className="mt-5 h-2 rounded-full bg-muted">
                 <div className="h-full rounded-full bg-primary" style={{ width: `${agent.readiness.score}%` }} />
-              </div>
+              </div> : <Link href="/recovery" className="mt-5 inline-block text-sm font-semibold">Add your recovery check-in</Link>}
               <p className="mt-4 text-sm text-muted-foreground">{agent.readiness.recommendation}</p>
               <div className="mt-4 flex flex-wrap gap-2">
-                {agent.readiness.drivers.slice(0, 4).map((driver) => (
+                {(agent.readiness.hasCheckIn ? agent.readiness.drivers.slice(0, 4) : []).map((driver) => (
                   <Badge key={driver} variant="secondary">{driver}</Badge>
                 ))}
               </div>
@@ -347,12 +381,12 @@ export default function DashboardPage() {
           <Card className="border-accent/20 bg-card/92">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <LineChart className="h-5 w-5 text-accent" />
-                Strain + Body Battery
+                <LineChart className="h-5 w-5 text-primary" />
+                Recorded training load
               </CardTitle>
-              <CardDescription>WHOOP-style training load plus an energy curve for the day.</CardDescription>
+              <CardDescription>Relative load from saved sessions. This is not a physiological measurement.</CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-5 md:grid-cols-[0.8fr_1.2fr]">
+            <CardContent>
               <div className="rounded-lg border bg-background/45 p-4">
                 <div className="flex items-center justify-between">
                   <Badge>{agent.strainLoad.label}</Badge>
@@ -364,33 +398,14 @@ export default function DashboardPage() {
                 <p className="text-sm text-muted-foreground">weekly load</p>
                 <p className="mt-4 text-xs text-muted-foreground">{agent.strainLoad.explanation}</p>
               </div>
-              <div className="rounded-lg border bg-background/45 p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 font-medium">
-                    <BatteryCharging className="h-4 w-4 text-primary" />
-                    Body battery
-                  </div>
-                  <Badge variant="secondary">{bodyBatteryAverage}% avg</Badge>
-                </div>
-                <div className="mt-5 grid h-40 grid-cols-5 items-end gap-2">
-                  {agent.bodyBattery.map((point) => (
-                    <div key={point.time} className="flex h-full flex-col justify-end gap-2">
-                      <div className="rounded-t-md bg-primary/80" style={{ height: `${Math.max(12, point.energy)}%` }} />
-                      <div>
-                        <p className="text-[10px] font-semibold">{point.time}</p>
-                        <p className="truncate text-[10px] text-muted-foreground">{point.label}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+
             </CardContent>
           </Card>
 
           <Card className="border-amber-400/20 bg-card/92">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Bell className="h-5 w-5 text-amber-300" />
+                <Bell className="h-5 w-5 text-warning" />
                 Smart Alerts
               </CardTitle>
               <CardDescription>Small nudges that prevent drop-off.</CardDescription>
@@ -413,7 +428,7 @@ export default function DashboardPage() {
       ) : null}
 
       {danceCourse ? (
-        <Card className="overflow-hidden border-primary/25 bg-[linear-gradient(135deg,color-mix(in_oklch,var(--primary)_12%,transparent),color-mix(in_oklch,var(--card)_94%,transparent)_48%,color-mix(in_oklch,var(--accent)_10%,transparent))]">
+        <Card>
           <CardContent className="grid gap-5 pt-6 lg:grid-cols-[1fr_auto] lg:items-center">
             <div>
               <div className="flex flex-wrap items-center gap-2">
@@ -474,7 +489,7 @@ export default function DashboardPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-accent" />
+                <TrendingUp className="h-5 w-5 text-primary" />
                 Performance Trends
               </CardTitle>
               <CardDescription>Signals that make the app feel like a health OS.</CardDescription>
@@ -495,6 +510,7 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
+      {!loading ? <>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: "Workout Streak", value: `${summary.streak} days`, icon: Flame },
@@ -507,10 +523,7 @@ export default function DashboardPage() {
             <Card key={index}>
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
-                  <div className="p-2 rounded-lg bg-primary/10">
-                    <Icon className="h-4 w-4 text-primary" />
-                  </div>
-                  <Badge variant="secondary">{loading ? "…" : "live"}</Badge>
+                  <Icon className="h-4 w-4 text-primary" />
                 </div>
                 <div className="text-2xl font-bold mt-3">{loading ? "…" : item.value}</div>
                 <div className="text-sm text-muted-foreground">{item.label}</div>
@@ -544,7 +557,7 @@ export default function DashboardPage() {
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">{achievement.description}</p>
                         </div>
-                        <Award className="h-5 w-5 shrink-0 text-accent" />
+                        <Award className="h-5 w-5 shrink-0 text-primary" />
                       </div>
                       <div className="mt-3 h-2 rounded-full bg-muted">
                         <div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
@@ -570,7 +583,7 @@ export default function DashboardPage() {
             <Card className="overflow-hidden border-accent/20 bg-card/95">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Users className="h-5 w-5 text-accent" />
+                  <Users className="h-5 w-5 text-primary" />
                   People Scoring
                 </CardTitle>
                 <CardDescription>Class leaderboard for demo comparisons, dance score, streak, and top move.</CardDescription>
@@ -613,7 +626,7 @@ export default function DashboardPage() {
         <Card className="border-accent/20 bg-accent/5">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Bot className="h-5 w-5 text-accent" />
+              <Bot className="h-5 w-5 text-primary" />
               Agentic Coach Brief
             </CardTitle>
             <CardDescription>The coach decides from saved scorecards, calories, reps, dance timing, achievements, and streak evidence.</CardDescription>
@@ -676,7 +689,7 @@ export default function DashboardPage() {
                 <p className="mt-1">Start your first coached workout or hip-hop session to unlock scorecards, calories, achievements, and coach memory.</p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <Link href="/coach/workout"><Button size="sm">Workout baseline</Button></Link>
-                  <Link href="/coach/dance"><Button size="sm" variant="outline">Hip-hop baseline</Button></Link>
+                  <Link href="/coach/dance"><Button size="sm" variant="ghost">Hip-hop baseline</Button></Link>
                 </div>
               </div>
             )}
@@ -734,6 +747,8 @@ export default function DashboardPage() {
           </Card>
         </div>
       </div>
+      </> : null}
+      </> : null}
     </div>
   );
 }

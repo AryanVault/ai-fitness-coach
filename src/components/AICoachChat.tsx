@@ -185,7 +185,7 @@ export function AICoachChat({ className }: { className?: string }) {
       <ScrollArea className="min-h-0 flex-1 overflow-hidden">
         <div className="p-4 space-y-4">
           {messages.length === 0 ? (
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-center py-8">
+            <motion.div initial={false} animate={{ opacity: 1, y: 0 }} className="text-center py-8">
               <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-primary/25 bg-primary/10">
                 <Sparkles className="h-8 w-8 text-primary" />
               </div>
@@ -231,7 +231,7 @@ export function AICoachChat({ className }: { className?: string }) {
                     {new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </span>
                   {message.role === "assistant" ? (
-                    <button className="opacity-0 transition-opacity group-hover:opacity-100" onClick={() => void copyMessage(message)}>
+                    <button aria-label="Copy message" className="opacity-60 transition-opacity hover:opacity-100 focus-visible:opacity-100" onClick={() => void copyMessage(message)}>
                       {copiedId === message.id ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                     </button>
                   ) : null}
@@ -268,8 +268,8 @@ export function AICoachChat({ className }: { className?: string }) {
         }}
       >
         <div className="flex gap-2">
-          <Input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask your coach anything..." />
-          <Button type="submit" size="icon" disabled={isLoading || !input.trim()}>
+          <Input aria-label="Message your coach" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask your coach anything..." />
+          <Button type="submit" size="icon" aria-label="Send message" disabled={isLoading || !input.trim()}>
             {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           </Button>
         </div>

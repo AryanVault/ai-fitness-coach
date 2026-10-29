@@ -105,6 +105,7 @@ export type RecoveryCheckIn = {
 };
 
 export type ReadinessReport = {
+  hasCheckIn?: boolean;
   score: number;
   label: "Prime" | "Ready" | "Manage" | "Recover";
   recommendation: string;
@@ -252,19 +253,21 @@ export function buildReadinessReport(input: {
   const score = Math.round(clamp(55 + sleepScore + energyScore - sorenessPenalty - stressPenalty - recentLoad * 0.45 - formPenalty, 1, 100));
   const label = score >= 85 ? "Prime" : score >= 70 ? "Ready" : score >= 50 ? "Manage" : "Recover";
   const drivers = [
-    `${sleepHours.toFixed(1)}h sleep signal`,
+    checkIn?.sleepHours !== undefined ? `${sleepHours.toFixed(1)}h self-reported sleep` : "sleep baseline estimated",
     checkIn?.energy ? `energy ${checkIn.energy}/5` : "energy baseline estimated",
     recoveryDebt ? `${recoveryDebt} recovery debt` : "low recovery debt",
     input.failedMetrics[0] ? `form limiter: ${input.failedMetrics[0]}` : "no major weak metric",
   ];
 
   return {
+    hasCheckIn: Boolean(checkIn),
     score,
     label,
     drivers,
     recoveryDebt,
     recommendation:
-      label === "Prime"
+      !checkIn ? "Complete a recovery check-in before using readiness to plan your session."
+      : label === "Prime"
         ? "Push skill or intensity while keeping camera reliability high."
         : label === "Ready"
           ? "Train normally and keep one focus metric in view."

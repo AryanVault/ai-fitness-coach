@@ -76,7 +76,7 @@ export default function ProfilesPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6 lg:p-8">
-      <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+      <motion.div initial={false} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <Badge className="mb-3 gap-1">
             <Users className="h-3 w-3" />

@@ -24,12 +24,20 @@ test("worker initializes with GPU disabled, transfers frames, and releases camer
   await page.waitForFunction(()=>{const s=(window as any).__cameraCheck;return s.frames>1 || !!s.error;},{},{timeout:60000});
   const state=await page.evaluate(()=>{const s=(window as any).__cameraCheck;return {initialized:s.initialized,error:s.error,maxInFlight:s.maxInFlight,frames:s.frames};});
   expect(state.error).toBe("");expect(state.initialized).toBe(true);expect(state.maxInFlight).toBe(1);expect(state.frames).toBeGreaterThan(1);
+  // A modified click opens another tab; the current workout must keep capturing.
+  // Platform/browser settings decide whether a modified click opens a tab.
+  // The invariant is that it must not navigate or stop this page's capture.
+  await page.locator('a[href="/dashboard"]').first().click({ modifiers: ["ControlOrMeta"] });
+  await page.bringToFront();
+  await expect(page).toHaveURL(/\/coach\/workout$/);
+  expect(await page.evaluate(() => (window as any).__cameraCheck.tracks.some((track: MediaStreamTrack) => track.readyState === "live"))).toBe(true);
   await page.locator('a[href="/dashboard"]').first().click();
   await expect(page).toHaveURL(/\/dashboard$/,{timeout:30000});
   expect(await page.evaluate(()=>(window as any).__cameraCheck.tracks.length)).toBeGreaterThan(0);
   await expect.poll(()=>page.evaluate(()=>(window as any).__cameraCheck.tracks.every((t:MediaStreamTrack)=>t.readyState==="ended"))).toBe(true);
  } finally {
-  await test.info().attach("camera-state",{body:JSON.stringify(await page.evaluate(()=>{
+  test.setTimeout(test.info().timeout+30000);
+  if (!page.isClosed()) await test.info().attach("camera-state",{body:JSON.stringify(await page.evaluate(()=>{
    const s=(window as any).__cameraCheck;const video=document.querySelector("video");return {initialized:s?.initialized,frames:s?.frames,error:s?.error,inFlight:s?.inFlight,maxInFlight:s?.maxInFlight,tracks:s?.tracks.map((t:MediaStreamTrack)=>t.readyState),hidden:document.hidden,video:video?{paused:video.paused,time:video.currentTime,width:video.videoWidth}:null};
   })),contentType:"application/json"});
   const cleanup=page.request;await page.close();
