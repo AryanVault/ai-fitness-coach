@@ -23,6 +23,7 @@ export type DanceRoutineSegment = {
     symmetryMax: number;
   };
   targetLandmarks: Partial<Record<DanceRoutineTargetPoint, { x: number; y: number }>>;
+  referenceKeyframes?: Array<{ timeMs: number; targetLandmarks: Partial<Record<DanceRoutineTargetPoint, { x: number; y: number }>> }>;
 };
 
 export type DanceStyle = "hip_hop" | "general";
@@ -74,6 +75,10 @@ export type DanceMetricGrade = {
 };
 
 export type DanceComparison = {
+  timingOffsetMs?: number | null;
+  timingUncertaintyMs?: number | null;
+  motionEventId?: number | null;
+  referenceKind?: "checkpoint" | "keyframes";
   segment: DanceRoutineSegment;
   poseSimilarity: number;
   timingScore: number;

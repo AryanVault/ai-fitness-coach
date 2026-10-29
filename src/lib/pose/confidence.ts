@@ -11,7 +11,7 @@ export function smoothLandmarks(previous: Landmark[] | null, next: Landmark[], a
       x: prior.x + (landmark.x - prior.x) * alpha,
       y: prior.y + (landmark.y - prior.y) * alpha,
       z: (prior.z ?? 0) + ((landmark.z ?? 0) - (prior.z ?? 0)) * alpha,
-      visibility: (prior.visibility ?? 1) + ((landmark.visibility ?? 1) - (prior.visibility ?? 1)) * alpha,
+      visibility: landmark.visibility ?? 0,
     };
   });
 }
@@ -90,18 +90,18 @@ export function buildTrackingFrame(options: {
   worldLandmarks?: Landmark[];
   imageAspectRatio?: number;
   previousSmoothed: Landmark[] | null;
+  filteredLandmarks?: Landmark[];
   timestampMs: number;
   frameIndex: number;
   fps: number;
   brightness: number;
   motion?: number;
 }): TrackingFrame {
-  const smoothedLandmarks = smoothLandmarks(options.previousSmoothed, options.rawLandmarks);
-  const avgVisibility = average(smoothedLandmarks.map((landmark) => landmark.visibility ?? 0));
+  const smoothedLandmarks = options.filteredLandmarks ?? smoothLandmarks(options.previousSmoothed, options.rawLandmarks);
   const motion = typeof options.motion === "number" ? options.motion : estimateMotion(options.previousSmoothed, smoothedLandmarks);
   const quality = evaluateFrameQuality({
     exerciseId: options.exerciseId,
-    landmarks: smoothedLandmarks,
+    landmarks: options.rawLandmarks,
     worldLandmarks: options.worldLandmarks ?? [],
     fps: options.fps,
     brightness: options.brightness,
@@ -117,16 +117,16 @@ export function buildTrackingFrame(options: {
     analysisLandmarks: toAnalysisLandmarks(smoothedLandmarks, options.imageAspectRatio ?? 1),
     imageAspectRatio: options.imageAspectRatio ?? 1,
     worldLandmarks: options.worldLandmarks ?? [],
-    avgVisibility: clamp(avgVisibility, 0, 1),
-    posePresence: clamp(avgVisibility, 0, 1),
-    trackingConfidence: clamp(Math.min(avgVisibility, quality.ready ? 1 : 0.92), 0, 1),
+    avgVisibility: clamp(quality.avgVisibility, 0, 1),
+    posePresence: clamp(quality.avgVisibility, 0, 1),
+    trackingConfidence: clamp(quality.avgVisibility, 0, 1),
     frameQuality: quality.frameQuality,
     frameQualityMessage: quality.message,
     view: quality.view,
     viewMessage: quality.allowedViews.includes(quality.view) ? "Camera angle is valid." : quality.message,
     brightness: options.brightness,
     motion,
-    reliability: buildReliabilityMap(smoothedLandmarks),
+    reliability: buildReliabilityMap(options.rawLandmarks),
     dominantSide: inferDominantSide(smoothedLandmarks),
   };
 }
@@ -146,15 +146,18 @@ export function evaluateConfidence(input: TrackingFrame | Landmark[], exerciseId
     });
   }
 
-  return {
-    ...evaluateFrameQuality({
+  const evaluated = evaluateFrameQuality({
       exerciseId: exerciseId ?? "squat",
       landmarks: input.smoothedLandmarks,
       worldLandmarks: input.worldLandmarks,
       fps: input.fps,
       brightness: input.brightness,
       motion: input.motion,
-    }),
+    });
+  return {
+    ...evaluated,
+    ...(input.frameQuality !== "ready" ? { ready: false, pauseTracking: true, frameQuality: input.frameQuality, message: input.frameQualityMessage, reasons: [input.frameQualityMessage] } : {}),
+    ...((input.frameAgeMs ?? 0) > 350 ? { ready: false, pauseTracking: true, frameQuality: "low_fps" as const, message: "Camera analysis is behind live motion. Waiting for a fresh frame.", reasons: ["Frame age exceeds 350 ms."] } : {}),
     avgVisibility: input.avgVisibility,
   };
 }

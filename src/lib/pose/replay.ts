@@ -2,6 +2,7 @@ import { selectFeedbackCue } from "@/lib/feedback/cues";
 import { advanceFeedbackState, createFeedbackState, type FeedbackCue } from "@/lib/feedback/state";
 import { evaluateSafety } from "@/lib/pose/safety";
 import { buildTrackingFrame, evaluateConfidence } from "@/lib/pose/confidence";
+import { createLandmarkFilter } from "@/lib/pose/landmark-filter";
 import { analyzeExercise, advancePhaseTracker, createPhaseTrackerState } from "@/lib/pose/exercises";
 import { createSessionAnalysisBuffer, finalizeSessionAnalysis, recordCue, recordFrame, recordTelemetry } from "@/lib/pose/session-buffer";
 import type { ExerciseId, FrameAnalysis, Landmark, SessionAnalysisBuffer, TrackingFrame } from "@/lib/pose/types";
@@ -13,6 +14,7 @@ export type ReplayFixtureFrame = {
   fps?: number;
   brightness?: number;
   motion?: number;
+  imageAspectRatio?: number;
 };
 
 export type ReplayFixture = {
@@ -43,6 +45,7 @@ export function runReplayFixture(fixture: ReplayFixture): ReplayResult {
   let repCount = 0;
   let pauseFrames = 0;
   let finalAnalysis: FrameAnalysis | null = null;
+  const filter = createLandmarkFilter();
 
   fixture.frames.forEach((frame, index) => {
     const trackingFrame: TrackingFrame = buildTrackingFrame({
@@ -50,9 +53,11 @@ export function runReplayFixture(fixture: ReplayFixture): ReplayResult {
       rawLandmarks: frame.landmarks,
       worldLandmarks: frame.worldLandmarks,
       previousSmoothed,
+      filteredLandmarks: filter.update(frame.landmarks, frame.timestampMs),
+      imageAspectRatio: frame.imageAspectRatio ?? 1,
       timestampMs: frame.timestampMs,
       frameIndex: index,
-      fps: frame.fps ?? 24,
+      fps: frame.fps ?? (index > 0 ? 1000 / Math.max(1, frame.timestampMs - fixture.frames[index-1].timestampMs) : 24),
       brightness: frame.brightness ?? 85,
       motion: frame.motion,
     });
@@ -61,6 +66,8 @@ export function runReplayFixture(fixture: ReplayFixture): ReplayResult {
     const confidence = evaluateConfidence(trackingFrame, fixture.exerciseId);
     const shouldPause = confidence.pauseTracking || !confidence.ready || confidence.avgVisibility < 0.55;
     if (shouldPause) {
+      trackerState = createPhaseTrackerState(frame.timestampMs);
+      filter.reset();
       pauseFrames += 1;
       recordTelemetry(sessionBuffer, {
         timestampMs: frame.timestampMs,
@@ -77,11 +84,9 @@ export function runReplayFixture(fixture: ReplayFixture): ReplayResult {
     trackerState = phaseUpdate.state;
 
     const analysis = analyzeExercise(fixture.exerciseId, trackingFrame, index, undefined, phaseUpdate.phase !== "idle" ? phaseUpdate.phase : undefined);
-    const safety = evaluateSafety(fixture.exerciseId, trackingFrame.analysisLandmarks ?? trackingFrame.smoothedLandmarks, fixture.injuries ?? []);
+    const safety = evaluateSafety(fixture.exerciseId, trackingFrame.analysisLandmarks ?? trackingFrame.smoothedLandmarks, fixture.injuries ?? [], trackingFrame.view);
     finalAnalysis = {
       ...analysis,
-      safety: Math.max(0, analysis.safety - (safety.severity === "critical" ? 35 : safety.severity === "warning" ? 12 : 0)),
-      overall: Math.max(0, analysis.overall - (safety.severity === "critical" ? 25 : safety.severity === "warning" ? 10 : 0)),
       frameQuality: trackingFrame.frameQuality,
       view: trackingFrame.view,
     };

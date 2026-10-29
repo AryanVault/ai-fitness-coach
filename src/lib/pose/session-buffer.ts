@@ -48,6 +48,7 @@ export function createSessionAnalysisBuffer(): SessionAnalysisBuffer {
 export function recordFrame(buffer: SessionAnalysisBuffer, trackingFrame: TrackingFrame, analysis: FrameAnalysis, sessionTimestampMs = trackingFrame.timestampMs) {
   const timestampMs = Math.max(0, Math.round(sessionTimestampMs));
   const point: SessionFramePoint = {
+    scoreAvailability: analysis.scoreAvailability,
     timestampMs,
     overall: analysis.overall,
     form: analysis.form,
@@ -94,8 +95,12 @@ export function recordTelemetry(buffer: SessionAnalysisBuffer, event: SessionTel
 
 export function finalizeSessionAnalysis(buffer: SessionAnalysisBuffer) {
   const frames = buffer.frames;
-  const stabilityAverage = frames.length ? Math.round(average(frames.map((frame) => frame.stability))) : 0;
-  const asymmetryAverage = frames.length ? clamp(Math.round(100 - average(frames.map((frame) => frame.symmetry))), 0, 100) : 0;
+  const stabilityFrames = frames.filter(frame => frame.scoreAvailability?.stability !== false);
+  const symmetryFrames = frames.filter(frame => frame.scoreAvailability?.symmetry !== false);
+  const tempoFrames = frames.filter(frame => frame.scoreAvailability?.tempo !== false);
+  const scoreFrames = frames.filter(frame => frame.scoreAvailability?.overall !== false);
+  const stabilityAverage = stabilityFrames.length ? Math.round(average(stabilityFrames.map((frame) => frame.stability))) : 0;
+  const asymmetryAverage = symmetryFrames.length ? clamp(Math.round(100 - average(symmetryFrames.map((frame) => frame.symmetry))), 0, 100) : 0;
   const recurringIssues = Array.from(
     buffer.issueHistory.reduce((map, item) => {
       map.set(item.message, (map.get(item.message) ?? 0) + 1);
@@ -109,9 +114,11 @@ export function finalizeSessionAnalysis(buffer: SessionAnalysisBuffer) {
   buffer.postSet = {
     stabilityAverage,
     asymmetryAverage,
-    tempoDrift: tempoDriftFromFrames(frames),
-    fatigueDrop: fatigueDropFromFrames(frames),
-    consistencyAverage: consistencyAverage(frames),
+    tempoDrift: tempoDriftFromFrames(tempoFrames),
+    fatigueDrop: fatigueDropFromFrames(scoreFrames),
+    consistencyAverage: consistencyAverage(scoreFrames),
+    availability: { stabilityAverage: stabilityFrames.length > 0, asymmetryAverage: symmetryFrames.length > 0, tempoDrift: tempoFrames.length >= 3, fatigueDrop: scoreFrames.length >= 3, consistencyAverage: scoreFrames.length >= 3 },
+    interpretation: "The legacy fatigueDrop field measures score drift only. Camera scores do not measure physiological fatigue, endurance, or injury risk.",
     recurringIssues,
   };
 

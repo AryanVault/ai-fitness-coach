@@ -1,7 +1,8 @@
+import { aggregateScoreEvidence } from "@/lib/pose/score-evidence";
 import { isMetricReliable } from "@/lib/pose/confidence";
 import { hipTilt, kneeSymmetry, shoulderTilt, trunkLean, trunkStackAngle } from "@/lib/pose/kinematics";
 import { angle, average, clamp, distance, midpoint, scoreFromRange, scoreFromTarget } from "@/lib/pose/math";
-import { EXERCISE_VIEW_POLICIES } from "@/lib/pose/quality";
+import { EXERCISE_VIEW_POLICIES, REQUIRED_BY_EXERCISE } from "@/lib/pose/quality";
 import type { ExerciseContract, ExerciseId, FrameAnalysis, Landmark, LiveMetric, PoseExercise, TrackingFrame } from "@/lib/pose/types";
 
 type ArmSide = "left" | "right";
@@ -35,6 +36,8 @@ export type PhaseTrackerState = {
   candidateSince: number;
   cycleLoaded: boolean;
   cycleStartedAt: number;
+  cycleArmed?: boolean;
+  lastObservedAt?: number;
 };
 
 export type PhaseTrackerUpdate = {
@@ -296,25 +299,7 @@ function finalize(
   const issueMetrics = reliableMetrics.filter((item) => item.score < 70);
   const correctionMetrics = reliableMetrics.filter((item) => item.score < 78);
   const positiveMetrics = reliableMetrics.filter((item) => item.score >= 85).slice(0, 3);
-  const scoringMetrics = metrics.length ? metrics : [metric("Control", 80, "Stay centered and keep moving with control.")];
-
-  const form = Math.round(average(scoringMetrics.slice(0, 2).map((item) => item.score)));
-  const rom = Math.round(
-    scoringMetrics.find((item) => item.name.includes("Range") || item.name.includes("Depth") || item.name.includes("Finish") || item.name.includes("Extension"))?.score ??
-      scoringMetrics[0]?.score ??
-      0,
-  );
-  const tempo = Math.round(scoringMetrics.find((item) => item.name.includes("Tempo"))?.score ?? form);
-  const stability = Math.round(
-    scoringMetrics.find((item) => item.name.includes("Stability") || item.name.includes("Stack"))?.score ?? average(scoringMetrics.map((item) => item.score)),
-  );
-  const symmetry = Math.round(
-    scoringMetrics.find((item) => item.name.includes("Symmetry") || item.name.includes("Balance"))?.score ?? stability,
-  );
-  const consistency = Math.round(average([form, stability, symmetry]));
-  const endurance = Math.round(average([form, rom, stability]));
-  const safety = Math.round(Math.min(...scoringMetrics.map((item) => item.score)));
-  const overall = Math.round(average([form, rom, tempo, stability, symmetry, consistency, endurance, safety]));
+  const scores = aggregateScoreEvidence(metrics);
 
   const issues = issueMetrics.map((item) => item.detail);
   const corrections = extras.corrections ?? correctionMetrics.map((item) => item.detail);
@@ -323,15 +308,8 @@ function finalize(
   const unreliableMetrics = metrics.filter((item) => item.reliable === false).map((item) => item.name);
 
   return {
-    form,
-    rom,
-    tempo,
-    stability,
-    symmetry,
-    consistency,
-    endurance,
-    safety,
-    overall,
+    ...scores,
+    analysisVersion: "movement-engine-v3",
     phase,
     metrics,
     issues,
@@ -478,6 +456,8 @@ export function createPhaseTrackerState(now = 0): PhaseTrackerState {
     candidateSince: 0,
     cycleLoaded: false,
     cycleStartedAt: now,
+    cycleArmed: false,
+    lastObservedAt: now,
   };
 }
 
@@ -487,9 +467,12 @@ export function advancePhaseTracker(
   previousState: PhaseTrackerState | null,
   now: number,
 ): PhaseTrackerUpdate {
-  const previous = previousState ?? createPhaseTrackerState(now);
+  const interrupted = previousState?.lastObservedAt !== undefined && (now <= previousState.lastObservedAt || now - previousState.lastObservedAt > 600);
+  const invalid = !isMetricReliable(resolveLandmarks(input), REQUIRED_BY_EXERCISE[exerciseId]) || (!Array.isArray(input) && (input.frameQuality !== "ready" || (["squat", "lunge"].includes(exerciseId) && !["side", "angled"].includes(input.view))));
+  const previous = interrupted || invalid ? createPhaseTrackerState(now) : previousState ?? createPhaseTrackerState(now);
+  if (invalid) return { state: previous, phase: "idle", rawPhase: "idle", phaseChanged: false, repCompleted: false, milestone: null };
   const rawPhase = getPhaseForExercise(exerciseId, input, previous.phase);
-  const next: PhaseTrackerState = { ...previous, rawPhase };
+  const next: PhaseTrackerState = { ...previous, rawPhase, lastObservedAt: now };
   let phaseChanged = false;
   let nextPhase = previous.phase;
 
@@ -512,16 +495,17 @@ export function advancePhaseTracker(
   let milestone: "load" | "complete" | null = null;
   const cycle = REP_CYCLE_BY_EXERCISE[exerciseId];
   if (phaseChanged && cycle) {
-    if (nextPhase === cycle.load) {
+    if (nextPhase === cycle.load && next.cycleArmed) {
       next.cycleLoaded = true;
       next.cycleStartedAt = now;
       milestone = "load";
     } else if (nextPhase === cycle.complete) {
-      if (next.cycleLoaded) {
+      if (next.cycleLoaded && now - next.cycleStartedAt >= 250) {
         repCompleted = true;
-        next.cycleLoaded = false;
         milestone = "complete";
       }
+      next.cycleLoaded = false;
+      next.cycleArmed = true;
       next.cycleStartedAt = now;
     }
   }
@@ -736,6 +720,8 @@ function analyzeSquat(input: Landmark[] | TrackingFrame, phaseOverride?: string)
   const kneeCollapse = (Math.max(0, ankleWidth - kneeWidth) / shoulderSpan) * 100;
   const hipShift = (Math.abs((hipCenter?.x ?? 0) - (ankleCenter?.x ?? kneeCenter?.x ?? 0)) / shoulderSpan) * 100;
   const depthActive = phase !== "top" || avgKnee < 150;
+  const sagittalVisible = Array.isArray(input) || input.view === "side" || input.view === "angled";
+  const frontalVisible = Array.isArray(input) || input.view === "front";
   const squatReliable = resolveReliability(input, "fullBody", [11, 12, 23, 24, 25, 26, 27, 28], {
     minAverage: 0.64,
     minPoint: 0.48,
@@ -746,15 +732,15 @@ function analyzeSquat(input: Landmark[] | TrackingFrame, phaseOverride?: string)
       "Depth",
       scoreFromRange(avgKnee, 86, 108, 18),
       avgKnee > 114
-        ? "Sit 5-10 cm deeper until the hips reach knee level."
+        ? "Lower a little further only while the position remains comfortable and controlled."
         : avgKnee < 74
           ? "Do not force yourself deeper than you can control. Stay stacked and own the bottom."
           : "Depth is solid and controlled.",
       Math.round(avgKnee),
       "86-108 degrees",
       {
-        reliable: squatReliable && depthActive,
-        unreliableDetail: "Depth is not reliable to judge until both hips, knees, and ankles stay visible through the descent.",
+        reliable: squatReliable && depthActive && sagittalVisible,
+        unreliableDetail: "Use an angled or side view for knee bend. A front view cannot reliably measure squat depth.",
       },
     ),
     metric(
@@ -766,7 +752,7 @@ function analyzeSquat(input: Landmark[] | TrackingFrame, phaseOverride?: string)
       Number(kneeCollapse.toFixed(1)),
       "0-10 inward collapse",
       {
-        reliable: squatReliable && depthActive,
+        reliable: squatReliable && depthActive && frontalVisible,
         unreliableDetail: "Knee tracking is not reliable to judge until knees and ankles stay visible through the bottom.",
       },
     ),
@@ -781,7 +767,7 @@ function analyzeSquat(input: Landmark[] | TrackingFrame, phaseOverride?: string)
       Math.round(torsoAngle),
       "58-82 degrees",
       {
-        reliable: squatReliable,
+        reliable: squatReliable && sagittalVisible,
         unreliableDetail: "Torso stack is too noisy to coach until the shoulders, hips, and knees are fully visible.",
       },
     ),
@@ -794,7 +780,7 @@ function analyzeSquat(input: Landmark[] | TrackingFrame, phaseOverride?: string)
       Number(hipShift.toFixed(1)),
       "0-11 shift",
       {
-        reliable: squatReliable,
+        reliable: squatReliable && frontalVisible,
         unreliableDetail: "Hip centering is not stable enough to judge until both legs stay fully in frame.",
       },
     ),
@@ -807,7 +793,7 @@ function analyzeSquat(input: Landmark[] | TrackingFrame, phaseOverride?: string)
       Math.round(symmetryGap),
       "0-14 degrees gap",
       {
-        reliable: squatReliable,
+        reliable: squatReliable && frontalVisible,
         unreliableDetail: "Knee symmetry is too noisy to coach until both legs stay clearly visible.",
       },
     ),
@@ -1177,7 +1163,7 @@ export function analyzeExercise(
     const frontKnee = Math.min(leftLeg, rightLeg);
     const torso = trunkLean(landmarks);
     const pelvisLevel = hipTilt(landmarks);
-    const lungeReliable = resolveReliability(input, "lowerBody", [23, 24, 25, 26, 27, 28], { minAverage: 0.63, minPoint: 0.45 });
+    const lungeReliable = (Array.isArray(input) || input.view === "side" || input.view === "angled") && resolveReliability(input, "lowerBody", [23, 24, 25, 26, 27, 28], { minAverage: 0.63, minPoint: 0.45 });
     const metrics = [
       metric(
         "Front Knee",

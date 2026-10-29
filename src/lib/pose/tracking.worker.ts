@@ -1,11 +1,12 @@
 import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
 import type { Landmark } from "@/lib/pose/types";
 export type PoseWorkerRequest = { id: number; type: "init" | "frame" | "stop"; quality?: "full" | "lite"; origin?: string; bitmap?: ImageBitmap; timestampMs?: number };
-export type PoseWorkerReply = { id: number; error?: string; landmarks?: Landmark[]; worldLandmarks?: Landmark[]; brightness?: number; latencyMs?: number };
+export type PoseWorkerReply = { id: number; error?: string; landmarks?: Landmark[]; worldLandmarks?: Landmark[]; brightness?: number; latencyMs?: number; delegate?: "GPU" | "CPU"; poseCount?: number };
 let landmarker: PoseLandmarker | null = null;
 let busy = false;
 let brightness = 80;
 let count = 0;
+let activeDelegate: "GPU" | "CPU" = "CPU";
 const scope = self as unknown as { onmessage: ((event: MessageEvent<PoseWorkerRequest>) => void) | null; postMessage: (reply: PoseWorkerReply) => void };
 scope.onmessage = async ({ data }) => {
   if (busy) { data.bitmap?.close(); scope.postMessage({ id: data.id, error: "Pose worker is busy" }); return; }
@@ -18,7 +19,8 @@ scope.onmessage = async ({ data }) => {
       let next: PoseLandmarker | null = null;
       for (const delegate of ["GPU", "CPU"] as const) {
         try {
-          next = await PoseLandmarker.createFromOptions(vision, { baseOptions: { modelAssetPath: `${origin}/mediapipe/models/pose_landmarker_${data.quality || "full"}.task`, delegate }, runningMode: "VIDEO", numPoses: 1, minPoseDetectionConfidence: 0.55, minPosePresenceConfidence: 0.55, minTrackingConfidence: 0.55 });
+          next = await PoseLandmarker.createFromOptions(vision, { baseOptions: { modelAssetPath: `${origin}/mediapipe/models/pose_landmarker_${data.quality || "full"}.task`, delegate }, runningMode: "VIDEO", numPoses: 2, minPoseDetectionConfidence: 0.55, minPosePresenceConfidence: 0.55, minTrackingConfidence: 0.55 });
+          activeDelegate = delegate;
           break;
         } catch { /* Try CPU if the worker has no compatible GPU context. */ }
       }
@@ -41,7 +43,7 @@ scope.onmessage = async ({ data }) => {
       }
     }
     const result = landmarker.detectForVideo(data.bitmap, data.timestampMs);
-    scope.postMessage({ id: data.id, landmarks: result.landmarks[0] ?? [], worldLandmarks: result.worldLandmarks[0] ?? [], brightness, latencyMs: performance.now() - started });
+    scope.postMessage({ id: data.id, landmarks: result.landmarks[0] ?? [], worldLandmarks: result.worldLandmarks[0] ?? [], poseCount: result.landmarks.length, delegate: activeDelegate, brightness, latencyMs: performance.now() - started });
   } catch { scope.postMessage({ id: data.id, error: "Pose analysis unavailable. Restart the camera to retry." }); }
   finally { data.bitmap?.close(); busy = false; }
 };

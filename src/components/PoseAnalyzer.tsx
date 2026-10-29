@@ -3,9 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { COACH_EXERCISES, selectCoachExercise } from "@/lib/pose/exercise-selection";
-import { initThreeHUD, updateThreeHUD, draw, type ThreeHUDState } from "@/components/coach/pose-renderer";
-import Particles, { initParticlesEngine } from "@tsparticles/react";
-import { loadSlim } from "@tsparticles/slim";
+import { disposeThreeHUD, initThreeHUD, updateThreeHUD, draw, type ThreeHUDState } from "@/components/coach/pose-renderer";
 import { Brain, CheckCircle2, Clipboard, GripVertical, Maximize2, Mic, Minimize2, Monitor, RotateCcw, Smartphone, Target, Timer, Volume2, VolumeX, Waves, XCircle, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { SessionSetupCard } from "@/components/coach/SessionSetupCard";
@@ -15,6 +13,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { createCameraController, getCameraProfile } from "@/lib/camera/controller";
 import { buildUnreliableCameraGuidance } from "@/lib/camera/guidance";
+import { createDanceMotionTracker } from "@/lib/dance/motion";
+import { createRoutineAudioTransport, type RoutineAudioState } from "@/lib/dance/audio-transport";
+import { createCalibrationTimer } from "@/lib/pose/calibration";
+import type { ScoreKey } from "@/lib/pose/score-evidence";
 import { evaluateHipHopTrainingFrame } from "@/lib/dance/training-engine";
 import type { DanceComparison, DanceRoutinePack, DanceTrainingFrameResult } from "@/lib/dance/types";
 import { selectFeedbackCue } from "@/lib/feedback/cues";
@@ -146,18 +148,18 @@ async function parseApiResponse(response: Response) {
 
 const IDS = COACH_EXERCISES;
 
-const DEFAULT_CALIBRATION_FRAMES = 18;
-const CURL_FAST_CALIBRATION_FRAMES = 4;
-const DANCE_FAST_CALIBRATION_FRAMES = 4;
+const DEFAULT_CALIBRATION_MS = 900;
+const CURL_FAST_CALIBRATION_MS = 500;
+const DANCE_FAST_CALIBRATION_MS = 500;
 
 function isFastStartExercise(exerciseId: ExerciseId) {
   return exerciseId === "bicep_curl" || exerciseId === "dance_basic";
 }
 
-function calibrationFramesForExercise(exerciseId: ExerciseId) {
-  if (exerciseId === "bicep_curl") return CURL_FAST_CALIBRATION_FRAMES;
-  if (exerciseId === "dance_basic") return DANCE_FAST_CALIBRATION_FRAMES;
-  return DEFAULT_CALIBRATION_FRAMES;
+function calibrationMsForExercise(exerciseId: ExerciseId) {
+  if (exerciseId === "bicep_curl") return CURL_FAST_CALIBRATION_MS;
+  if (exerciseId === "dance_basic") return DANCE_FAST_CALIBRATION_MS;
+  return DEFAULT_CALIBRATION_MS;
 }
 
 const ML_MISTAKE_LABELS: Record<PostureMistakeClass, string> = {
@@ -278,14 +280,14 @@ function DanceCoachSkeleton({ training }: { training: DanceTrainingFrameResult }
     <div className="rounded-2xl border border-border bg-primary/10 p-4">
       <div className="grid gap-4 md:grid-cols-[160px_1fr] md:items-center">
         <div className="rounded-xl border border-border bg-background/80 p-3">
-          <svg viewBox="0 0 100 100" className="h-36 w-full">
+          <svg viewBox="0 0 100 100" role="img" aria-label="Starter pose checkpoint" className="h-36 w-full text-primary">
             {skeleton.connections.map(([from, to]) => {
               const start = skeleton.points[from];
               const end = skeleton.points[to];
-              return <line key={`${from}-${to}`} x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke="rgb(217 70 239)" strokeWidth="2.2" strokeLinecap="round" opacity="0.75" />;
+              return <line key={`${from}-${to}`} x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" opacity="0.75" />;
             })}
             {Object.entries(skeleton.points).map(([name, point]) => (
-              <circle key={name} cx={point.x} cy={point.y} r={name.includes("Wrist") ? 3.2 : 2.7} fill={name.includes("Wrist") ? "rgb(34 211 238)" : "rgb(244 244 245)"} opacity={point.visible ? 1 : 0.35} />
+              <circle key={name} cx={point.x} cy={point.y} r={name.includes("Wrist") ? 3.2 : 2.7} fill="currentColor" opacity={point.visible ? 1 : 0.35} />
             ))}
           </svg>
         </div>
@@ -310,7 +312,7 @@ function scorecardLabels(exerciseId: ExerciseId) {
   if (exerciseId === "dance_basic") {
     return [
       { label: "Hip-hop shape", valueKey: "elbowPath" as const },
-      { label: "Groove bounce", valueKey: "rangeOfMotion" as const },
+      { label: "Bounce range", valueKey: "rangeOfMotion" as const },
       { label: "Beat timing", valueKey: "tempoControl" as const },
       { label: "Torso control", valueKey: "torsoStability" as const },
     ];
@@ -423,6 +425,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   });
   const { controllerRef: cameraControllerRef, engineRef: trackingEngineRef } = cameraRuntime;
   const trackingFrameRef = useRef<TrackingFrame | null>(null);
+  const inferenceSamplesRef = useRef<number[]>([]);
+  const [trackingRuntime, setTrackingRuntime] = useState<{ inferenceMs?: number; ageMs?: number; captureFps?: number; model?: string; delegate?: string }>({});
   const runningRef = useRef(false);
   const mirrorRef = useRef(true);
   const exerciseIdRef = useRef<ExerciseId>(exerciseId);
@@ -433,6 +437,21 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const feedbackStateRef = useRef(createFeedbackState());
   const lastRepAtRef = useRef(0);
   const startedAtRef = useRef(0);
+  const danceMotionRef = useRef(createDanceMotionTracker());
+  const lastDanceEventRef = useRef<number | null>(null);
+  const calibrationTimerRef = useRef(createCalibrationTimer());
+  const [routineAudioState, setRoutineAudioState] = useState<RoutineAudioState>("idle");
+  const routineAudioRef = useRef<ReturnType<typeof createRoutineAudioTransport> | null>(null);
+  const [routineBeat, setRoutineBeat] = useState(1);
+  const startRoutineAudio = () => {
+    const routine = danceRoutineRef.current;
+    if (!routine) return;
+    routineAudioRef.current ??= createRoutineAudioTransport({ onState: setRoutineAudioState });
+    danceMotionRef.current.reset();
+    void routineAudioRef.current.start(routine.audioUrl).then(ok => {
+      if (!ok && runningRef.current) toast.message("Silent practice active. Beat timing is unavailable until audio plays.");
+    });
+  };
   const repsRef = useRef(0);
   const voiceRef = useRef(createVoiceFeedbackController());
   const repDataRef = useRef<any[]>([]);
@@ -445,12 +464,12 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const framesRef = useRef<FrameAnalysis[]>([]);
   const curveRef = useRef<number[]>([]);
   const sessionBufferRef = useRef<SessionAnalysisBuffer>(createSessionAnalysisBuffer());
-  const danceSegmentRef = useRef<Record<string, { label: string; scores: number[]; timing: number[]; transition: number[]; reliability: number[] }>>({});
+  const danceSegmentRef = useRef<Record<string, { label: string; scores: number[]; timing: number[]; transition: number[]; reliability: number[]; observedDurationMs: number; lastTimestampMs: number }>>({});
   const lastCoachRef = useRef(0);
   const lastCoachSignatureRef = useRef<string | null>(null);
   const lastOverallRef = useRef(0);
   const lastPauseReasonRef = useRef<string | null>(null);
-  const calibrationHoldFramesRef = useRef(0);
+  const calibrationHoldMsRef = useRef(0);
   const savingRef = useRef(false);
   const pipDragRef = useRef<{ sx: number; sy: number; px: number; py: number } | null>(null);
 
@@ -516,48 +535,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const replayThreeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const replayThreeStateRef = useRef<ThreeHUDState | null>(null);
 
-  const [particlesInit, setParticlesInit] = useState(false);
-  const [sparkPosition, setSparkPosition] = useState<{ x: number; y: number } | null>(null);
-  const [showSparks, setShowSparks] = useState(false);
 
-  const particlesConfig = useMemo(() => {
-    if (!sparkPosition) return {};
-    return {
-      fullScreen: { enable: false },
-      fpsLimit: 60,
-      particles: {
-        number: { value: 0 },
-        color: { value: "#10b981" },
-        shape: { type: "circle" },
-        opacity: {
-          value: { min: 0.3, max: 0.8 },
-          animation: { enable: true, speed: 1.5, minimumValue: 0, sync: false }
-        },
-        size: {
-          value: { min: 3, max: 6 },
-          animation: { enable: true, speed: 4, minimumValue: 0.5, sync: false }
-        },
-        move: {
-          enable: true,
-          direction: "none",
-          speed: { min: 3, max: 9 },
-          random: true,
-          straight: false,
-          outModes: { default: "destroy" },
-          gravity: { enable: true, acceleration: 6 }
-        }
-      },
-      emitters: [
-        {
-          direction: "top",
-          rate: { quantity: 18, delay: 0.04 },
-          life: { duration: 0.45, count: 1 },
-          position: { x: sparkPosition.x, y: sparkPosition.y },
-          size: { width: 5, height: 5 }
-        }
-      ]
-    };
-  }, [sparkPosition]);
 
   useEffect(() => {
     let active = true;
@@ -585,7 +563,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
           threeCanvasRef.current.height = overlayRef.current.height;
         }
         if (!threeStateRef.current) {
-          threeStateRef.current = initThreeHUD(threeCanvasRef.current);
+          try { threeStateRef.current = initThreeHUD(threeCanvasRef.current); }
+          catch { setHudMode("2d"); toast.message("Depth view is unavailable. Using the 2D overlay."); return; }
         }
         const targetW = overlayRef.current?.width || 640;
         const targetH = overlayRef.current?.height || 360;
@@ -611,7 +590,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     setFeedback(cue.message);
     setSecondaryFeedback(cue.secondaryNote ?? "");
     if (options.logEvent) {
-      const timestamp = Math.max(0, Date.now() - startedAtRef.current);
+      const timestamp = Math.max(0, Math.round(performance.now() - startedAtRef.current));
       eventsRef.current.push({
         timestamp,
         type: options.eventType ?? (cue.severity === "critical" ? "stop" : "cue"),
@@ -644,6 +623,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   };
 
   const reset = () => {
+    routineAudioRef.current?.stop();
+    danceMotionRef.current.reset();
+    calibrationTimerRef.current.reset();
+    lastDanceEventRef.current = null;
+    inferenceSamplesRef.current = [];
     phaseTrackerRef.current = createPhaseTrackerState();
     feedbackStateRef.current = createFeedbackState();
     lastRepAtRef.current = 0;
@@ -687,7 +671,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     curlBaselineRef.current = null;
     setTrackingPausedReason(null);
     setCalibrationHoldProgress(0);
-    calibrationHoldFramesRef.current = 0;
+    calibrationHoldMsRef.current = 0;
     setSeconds(0);
     setCalories(0);
     setStreakCount(0);
@@ -703,7 +687,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const onPipPointerMove = (event: React.PointerEvent) => {
     const drag = pipDragRef.current;
     if (!drag) return;
-    setPipPos({ x: Math.max(0, drag.px + (event.clientX - drag.sx)), y: Math.max(0, drag.py + (event.clientY - drag.sy)) });
+    const box = event.currentTarget.getBoundingClientRect();
+    setPipPos({ x: Math.max(0, Math.min(window.innerWidth - box.width, drag.px - (event.clientX - drag.sx))), y: Math.max(0, Math.min(window.innerHeight - box.height, drag.py - (event.clientY - drag.sy))) });
   };
 
   const onPipPointerUp = () => {
@@ -777,31 +762,6 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       setStreakCount(0);
     }
 
-    // Joint Spark Particles on Excellent Reps!
-    if (frame.overall >= 88 && trackingFrameRef.current?.smoothedLandmarks) {
-      const landmarks = trackingFrameRef.current.smoothedLandmarks;
-      const activeExercise = exerciseIdRef.current;
-      let jointIdx = 11; // default left shoulder
-      
-      if (activeExercise === "squat" || activeExercise === "lunge" || activeExercise === "warrior") {
-        jointIdx = 25; // left knee
-      } else if (activeExercise === "bicep_curl" || activeExercise === "pushup" || activeExercise === "plank") {
-        jointIdx = 13; // left elbow
-      } else if (activeExercise === "jumping_jack") {
-        jointIdx = 15; // left wrist
-      }
-      
-      const pt = landmarks[jointIdx];
-      if (pt) {
-        const adjustedX = mirrorRef.current ? (1 - pt.x) : pt.x;
-        setSparkPosition({ x: adjustedX * 100, y: pt.y * 100 });
-        setShowSparks(true);
-        setTimeout(() => {
-          setShowSparks(false);
-        }, 1200);
-      }
-    }
-
     // Muscle Fatigue Compensation Analysis
     if (repsRef.current >= 4) {
       const recentReps = repDataRef.current.slice(-3);
@@ -809,9 +769,9 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       const firstRepForm = repDataRef.current[0]?.formScore ?? 85;
 
       if (avgForm < firstRepForm - 10) {
-        const alertMsg = "Fatigue detected. Focus on your core stability and keep your movements controlled.";
+        const alertMsg = "Recent movement scores are lower. Pause, check your setup, and continue only if comfortable.";
         voiceRef.current.speak(alertMsg, "warning", "fatigue_compensation");
-        toast.warning("Compensation Warning: Form is slipping due to fatigue!", { duration: 5000 });
+        toast.warning("Recent movement scores have dropped. Check your setup or take a break.", { duration: 5000 });
       }
     }
     pushTelemetry({
@@ -855,7 +815,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
 
   const maybeCoach = async (frame: FrameAnalysis, cue: FeedbackCue, triggerReason: CoachTriggerReason | null) => {
     if (triggerReason !== "manual") return;
-    const now = Date.now();
+    const now = performance.now();
     const curlInterval = coachLevelRef.current === "easy" ? 14_000 : coachLevelRef.current === "hard" ? 6_000 : 8_000;
     const interval = exerciseIdRef.current === "bicep_curl" ? curlInterval : exerciseIdRef.current === "squat" ? 8_500 : exerciseIdRef.current === "dance_basic" ? 7_500 : 12_000;
     if (triggerReason !== "manual" && now - lastCoachRef.current < interval) return;
@@ -943,7 +903,9 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       trackingFrameRef.current = null;
       curlFrameHistoryRef.current = [];
       squatFrameHistoryRef.current = [];
-      calibrationHoldFramesRef.current = 0;
+      calibrationHoldMsRef.current = 0;
+      calibrationTimerRef.current.reset();
+      danceMotionRef.current.reset();
       phaseTrackerRef.current = createPhaseTrackerState();
       postureModel.reset();
 
@@ -953,7 +915,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       feedbackStateRef.current = createFeedbackState();
       setTrackingPausedReason(runningRef.current ? "Camera lost. Scoring is paused until you are fully back in frame." : null);
       if (runningRef.current && lastPauseReasonRef.current !== lost.message) {
-        pushTelemetry({ timestampMs: Math.max(0, Date.now() - startedAtRef.current), type: "camera_disconnected", message: lost.message });
+        pushTelemetry({ timestampMs: Math.max(0, performance.now() - startedAtRef.current), type: "camera_disconnected", message: lost.message });
         emitCue(
           {
             message: lost.message,
@@ -972,23 +934,27 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     }
 
     const previousTimestamp = trackingFrameRef.current?.timestampMs;
-    if (previousTimestamp !== undefined && (trackingFrame.timestampMs <= previousTimestamp || trackingFrame.timestampMs - previousTimestamp > 1000)) {
+    if (previousTimestamp !== undefined && (trackingFrame.timestampMs <= previousTimestamp || trackingFrame.timestampMs - previousTimestamp > 500)) {
       phaseTrackerRef.current = createPhaseTrackerState();
       curlFrameHistoryRef.current = [];
       squatFrameHistoryRef.current = [];
       postureModel.reset();
+      danceMotionRef.current.reset();
+      calibrationTimerRef.current.reset();
     }
     trackingFrameRef.current = trackingFrame;
+    if (Number.isFinite(trackingFrame.inferenceLatencyMs)) inferenceSamplesRef.current = [...inferenceSamplesRef.current.slice(-599), trackingFrame.inferenceLatencyMs!];
+    setTrackingRuntime({ inferenceMs: trackingFrame.inferenceLatencyMs, ageMs: trackingFrame.frameAgeMs, captureFps: trackingFrame.captureFps, model: trackingFrame.modelQuality, delegate: trackingFrame.delegate });
     setFps(Math.round(trackingFrame.fps));
     const gate = evaluateConfidence(trackingFrame, currentId);
     setConfidence(gate);
     confidenceRef.current = gate;
 
     if (!runningRef.current) {
-      const requiredHoldFrames = calibrationFramesForExercise(currentId);
+      const requiredHoldMs = calibrationMsForExercise(currentId);
       const canAdvanceCalibration = gate.ready;
-      const nextHoldProgress = canAdvanceCalibration ? Math.min(calibrationHoldFramesRef.current + 1, requiredHoldFrames) : 0;
-      calibrationHoldFramesRef.current = nextHoldProgress;
+      const nextHoldProgress = calibrationTimerRef.current.update(trackingFrame.timestampMs, canAdvanceCalibration, requiredHoldMs);
+      calibrationHoldMsRef.current = nextHoldProgress;
       setCalibrationHoldProgress(nextHoldProgress);
       if (currentId === "bicep_curl" && canAdvanceCalibration) {
         curlCalibrationFramesRef.current = [...curlCalibrationFramesRef.current.slice(-30), trackingFrame];
@@ -1017,12 +983,15 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     const pauseReason = shouldPauseScoring ? `${gate.message} Rep counting is paused until tracking recovers.` : null;
     setTrackingPausedReason(pauseReason);
     if (shouldPauseScoring) {
+      danceMotionRef.current.reset();
+      setDanceComparison(null);
+      calibrationTimerRef.current.reset();
       phaseTrackerRef.current = createPhaseTrackerState();
       setCalibrationHoldProgress(0);
-      calibrationHoldFramesRef.current = 0;
+      calibrationHoldMsRef.current = 0;
       if (lastPauseReasonRef.current !== pauseReason) {
         pushTelemetry({
-          timestampMs: Math.max(0, Date.now() - startedAtRef.current),
+          timestampMs: Math.max(0, performance.now() - startedAtRef.current),
           type: "low_confidence_pause",
           message: pauseReason ?? gate.message,
           meta: { frameQuality: trackingFrame.frameQuality, view: trackingFrame.view, fps: trackingFrame.fps, brightness: trackingFrame.brightness },
@@ -1046,9 +1015,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       lastPauseReasonRef.current = null;
     }
 
-    const now = Date.now();
+    const now = Math.round(trackingFrame.timestampMs);
     const elapsedMs = Math.max(0, now - startedAtRef.current);
-    const activeDanceCheckpoint = currentId === "dance_basic" ? getActiveDanceCheckpoint(danceRoutineRef.current, elapsedMs) : null;
+    const audioPositionMs = routineAudioRef.current?.positionMs(now) ?? null;
+    const routineElapsedMs = audioPositionMs ?? elapsedMs;
+    const activeDanceCheckpoint = currentId === "dance_basic" ? getActiveDanceCheckpoint(danceRoutineRef.current, routineElapsedMs) : null;
     const previousPhaseState = phaseTrackerRef.current;
     const phaseUpdate = shouldPauseRepTracking
       ? { state: previousPhaseState, phase: previousPhaseState.phase, rawPhase: previousPhaseState.rawPhase, phaseChanged: false, repCompleted: false, milestone: null }
@@ -1056,14 +1027,56 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     phaseTrackerRef.current = phaseUpdate.state;
 
     const frame = analyzeExercise(currentId, trackingFrame, activeDanceCheckpoint?.index ?? Math.floor(elapsedMs / 4000), activeDanceCheckpoint?.step.cue, phaseUpdate.phase !== "idle" ? phaseUpdate.phase : undefined);
-    const safety = evaluateSafety(currentId, trackingFrame.analysisLandmarks ?? trackingFrame.smoothedLandmarks, [...(profileRef.current?.injuries ?? []), ...(profileRef.current?.painPoints ?? [])]);
-    const resolved: FrameAnalysis = {
+    const safety = evaluateSafety(currentId, trackingFrame.analysisLandmarks ?? trackingFrame.smoothedLandmarks, [...(profileRef.current?.injuries ?? []), ...(profileRef.current?.painPoints ?? [])], trackingFrame.view);
+    let resolved: FrameAnalysis = {
       ...frame,
-      safety: Math.max(0, frame.safety - (safety.severity === "critical" ? 35 : safety.severity === "warning" ? 12 : 0)),
-      overall: Math.max(0, frame.overall - (safety.severity === "critical" ? 25 : safety.severity === "warning" ? 10 : 0)),
+
       frameQuality: trackingFrame.frameQuality,
       view: trackingFrame.view,
     };
+
+    if (currentId === "dance_basic" && danceRoutineRef.current?.segments?.length) {
+      const motion = danceMotionRef.current.update({ landmarks: trackingFrame.analysisLandmarks ?? trackingFrame.smoothedLandmarks, timestampMs: now, routineMs: routineElapsedMs, bpm: danceRoutineRef.current.bpm, synchronized: audioPositionMs !== null });
+      const training = evaluateHipHopTrainingFrame({ landmarks: trackingFrame.analysisLandmarks ?? trackingFrame.smoothedLandmarks, routine: danceRoutineRef.current, elapsedMs: routineElapsedMs, analysis: resolved, motion });
+      setRoutineBeat(Math.floor(routineElapsedMs / (60000 / danceRoutineRef.current.bpm)) % 8 + 1);
+      const comparison = training?.comparison ?? null;
+      setDanceTraining(training);
+      setDanceComparison(comparison);
+      if (comparison) {
+        const measured = Object.values(comparison.metrics).filter(metric => metric.reliable);
+        resolved = {
+          ...resolved, form: comparison.poseSimilarity, rom: comparison.metrics.grooveBounce.score,
+          tempo: comparison.timingScore, stability: comparison.metrics.torsoControl.score,
+          overall: comparison.overall, consistency: 0, endurance: 0, safety: 0,
+          scoreAvailability: { form: comparison.metrics.poseShape.reliable, rom: comparison.metrics.grooveBounce.reliable, tempo: comparison.metrics.timing.reliable, stability: comparison.metrics.torsoControl.reliable, symmetry: false, consistency: false, endurance: false, safety: false, overall: measured.length > 0 },
+          metrics: Object.values(comparison.metrics).map(metric => ({ name: metric.label, score: metric.score, detail: metric.detail, value: metric.value, target: metric.target, reliable: metric.reliable, status: metric.score >= 84 ? "excellent" : metric.score >= 68 ? "good" : "warning" })),
+          corrections: measured.filter(metric => metric.score < 68).map(metric => metric.detail),
+          issues: measured.filter(metric => metric.score < 68).map(metric => metric.detail),
+          positives: measured.filter(metric => metric.score >= 84).map(metric => metric.detail),
+          injuryRisks: [], primaryFocus: comparison.primaryIssue,
+        };
+        setTechniqueScorecard({
+          elbowPath: comparison.metrics.poseShape.score,
+          rangeOfMotion: comparison.metrics.grooveBounce.score,
+          tempoControl: comparison.metrics.timing.score,
+          torsoStability: comparison.metrics.torsoControl.score,
+        });
+        const bucket = danceSegmentRef.current[comparison.segment.id] ?? { label: comparison.segment.label, scores: [], timing: [], transition: [], reliability: [], observedDurationMs: 0, lastTimestampMs: now };
+        if (now - bucket.lastTimestampMs <= 200) bucket.observedDurationMs += Math.max(0, now - bucket.lastTimestampMs);
+        bucket.lastTimestampMs = now;
+        bucket.scores.push(comparison.overall);
+        if (comparison.metrics.timing.reliable && comparison.motionEventId !== lastDanceEventRef.current) {
+          bucket.timing.push(comparison.timingScore); lastDanceEventRef.current = comparison.motionEventId ?? null;
+        }
+        if (comparison.metrics.transition.reliable) bucket.transition.push(comparison.transitionQuality);
+        bucket.reliability.push(comparison.reliability);
+        danceSegmentRef.current[comparison.segment.id] = bucket;
+      }
+    } else {
+      setDanceTraining(null);
+      setDanceComparison(null);
+    }
+
 
     framesRef.current.push(resolved);
     landmarksHistoryRef.current.push({
@@ -1097,29 +1110,6 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     setAnalysis(resolved);
     analysisRef.current = resolved;
 
-    if (currentId === "dance_basic" && danceRoutineRef.current?.segments?.length) {
-      const training = evaluateHipHopTrainingFrame({ landmarks: trackingFrame.smoothedLandmarks, routine: danceRoutineRef.current, elapsedMs, analysis: resolved });
-      const comparison = training?.comparison ?? null;
-      setDanceTraining(training);
-      setDanceComparison(comparison);
-      if (comparison) {
-        setTechniqueScorecard({
-          elbowPath: comparison.metrics.poseShape.score,
-          rangeOfMotion: comparison.metrics.grooveBounce.score,
-          tempoControl: comparison.metrics.timing.score,
-          torsoStability: comparison.metrics.torsoControl.score,
-        });
-        const bucket = danceSegmentRef.current[comparison.segment.id] ?? { label: comparison.segment.label, scores: [], timing: [], transition: [], reliability: [] };
-        bucket.scores.push(comparison.overall);
-        bucket.timing.push(comparison.timingScore);
-        bucket.transition.push(comparison.transitionQuality);
-        bucket.reliability.push(comparison.reliability);
-        danceSegmentRef.current[comparison.segment.id] = bucket;
-      }
-    } else {
-      setDanceTraining(null);
-      setDanceComparison(null);
-    }
 
     const elapsedSeconds = Math.max(1, Math.floor((now - startedAtRef.current) / 1000));
     setSeconds(elapsedSeconds);
@@ -1180,6 +1170,9 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const stopCamera = (options: { preserveResults?: boolean } = {}) => {
     try {
       cameraRuntime.stop();
+      routineAudioRef.current?.stop();
+      danceMotionRef.current.reset();
+      calibrationTimerRef.current.reset();
     } catch {}
     trackingFrameRef.current = null;
     runningRef.current = false;
@@ -1204,7 +1197,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     curlFrameHistoryRef.current = [];
     squatFrameHistoryRef.current = [];
     setCalibrationHoldProgress(0);
-    calibrationHoldFramesRef.current = 0;
+    calibrationHoldMsRef.current = 0;
     voiceRef.current.stop();
     runDrawLoop(null, 0, exerciseIdRef.current);
   };
@@ -1213,8 +1206,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     if (profileLoading || profileError || !profile?.userId) { toast.error("Wait for your saved profile to load before starting."); return; }
     if (!cameraOn) return;
     const isFastStart = isFastStartExercise(exerciseIdRef.current);
-    const requiredHoldFrames = calibrationFramesForExercise(exerciseIdRef.current);
-    if (!confidence.ready || calibrationHoldFramesRef.current < requiredHoldFrames) {
+    const requiredHoldMs = calibrationMsForExercise(exerciseIdRef.current);
+    if (!confidence.ready || calibrationHoldMsRef.current < requiredHoldMs) {
       const message = confidence.ready ? "Hold steady in the ready position for one more moment before starting." : confidence.message;
       pushTelemetry({ timestampMs: 0, type: "calibration_blocked", message, meta: { frameQuality: confidence.frameQuality, view: confidence.view } });
       toast.error(message);
@@ -1230,7 +1223,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       curlBaselineRef.current = sessionCurlBaseline;
       setCurlBaseline(sessionCurlBaseline);
     }
-    const now = Date.now();
+    const now = Math.round(performance.now());
     startedAtRef.current = now;
     clientSessionIdRef.current = crypto.randomUUID();
     phaseTrackerRef.current = trackingFrameRef.current?.smoothedLandmarks?.length
@@ -1238,6 +1231,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       : createPhaseTrackerState(now);
     runningRef.current = true;
     setRunning(true);
+    if (exerciseIdRef.current === "dance_basic") startRoutineAudio();
     setTrackingPausedReason(null);
     emitCue({
       message: "Session live. Keep your full body in frame and follow the cue.",
@@ -1251,11 +1245,15 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const stopSession = async () => {
     if (savingRef.current) return;
     savingRef.current = true;
+    routineAudioRef.current?.stop();
+    danceMotionRef.current.reset();
     runningRef.current = false;
     setRunning(false);
     try {
-      const pick = (selector: (frame: FrameAnalysis) => number) => Math.round(average(framesRef.current.map(selector)));
-      const scoring = { form: pick((frame) => frame.form), rom: pick((frame) => frame.rom), tempo: pick((frame) => frame.tempo), stability: pick((frame) => frame.stability), symmetry: pick((frame) => frame.symmetry), consistency: pick((frame) => frame.consistency), endurance: pick((frame) => frame.endurance), safety: pick((frame) => frame.safety) };
+      const samples = [...inferenceSamplesRef.current].sort((a,b) => a-b);
+      const runtime = samples.length ? { provider: "mediapipe" as const, model: trackingFrameRef.current?.modelQuality, delegate: trackingFrameRef.current?.delegate, inferenceP50Ms: samples[Math.floor((samples.length-1)*.5)], inferenceP95Ms: samples[Math.floor((samples.length-1)*.95)], sampleCount: samples.length } : undefined;
+      const pick = (key: ScoreKey) => Math.round(average(framesRef.current.filter(frame => frame.scoreAvailability?.[key] !== false).map(frame => frame[key])));
+      const scoring = { form: pick("form"), rom: pick("rom"), tempo: pick("tempo"), stability: pick("stability"), symmetry: pick("symmetry"), consistency: pick("consistency"), endurance: pick("endurance"), safety: pick("safety") };
       const sessionAnalysis = finalizeSessionAnalysis(sessionBufferRef.current);
       const danceSegments = mode === "dance"
         ? Object.entries(danceSegmentRef.current).map(([id, value]) => ({
@@ -1263,19 +1261,21 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
             label: value.label,
             overall: Math.round(average(value.scores)),
             timing: Math.round(average(value.timing)),
+            timingEvents: value.timing.length,
+            observedDurationMs: Math.round(value.observedDurationMs),
             transition: Math.round(average(value.transition)),
             reliability: Math.round(average(value.reliability)),
           }))
         : [];
       const data = await persistence.save({
           clientSessionId: clientSessionIdRef.current ?? (clientSessionIdRef.current = crypto.randomUUID()),
-          modelEvidence: { artifactVersion: mlPrediction?.modelVersion ?? "heuristic-rules-v2", featureVersion: mlPrediction?.featureVersion ?? "isotropic-geometry-v2", source: mlPrediction?.source ?? "heuristic", calibratedConfidence: mlPrediction?.calibratedConfidence ?? null, faultScores: mlPrediction?.mistakeProbabilities, suppressionReason: mlPrediction?.suppressionReason, evaluationStatus: mlPrediction?.evaluationStatus ?? "disabled", supportedFaults: mlPrediction?.supportedFaults ?? [] },
+          modelEvidence: { runtime, analysisVersion: "movement-engine-v3", scoreAvailability: Object.fromEntries((["form", "rom", "tempo", "stability", "symmetry", "consistency", "endurance", "safety", "overall"] as ScoreKey[]).map(key => [key, framesRef.current.some(frame => frame.scoreAvailability?.[key] !== false)])) as Record<ScoreKey, boolean>, artifactVersion: mlPrediction?.modelVersion ?? "heuristic-rules-v2", featureVersion: mlPrediction?.featureVersion ?? "isotropic-geometry-v2", source: mlPrediction?.source ?? "heuristic", calibratedConfidence: mlPrediction?.calibratedConfidence ?? null, faultScores: mlPrediction?.mistakeProbabilities, suppressionReason: mlPrediction?.suppressionReason, evaluationStatus: mlPrediction?.evaluationStatus ?? "disabled", supportedFaults: mlPrediction?.supportedFaults ?? [] },
           type: mode === "dance" ? "dance" : exerciseRef.current.category === "cardio" ? "cardio" : "strength",
           exerciseType: exerciseIdRef.current,
           duration: Math.max(1, Math.round(secondsRef.current / 60)),
           caloriesBurned: caloriesRef.current,
           totalReps: repsRef.current,
-          compositeScore: analysisRef.current.overall,
+          compositeScore: pick("overall"),
           scoringBreakdown: scoring,
           fatigueCurve: curveRef.current,
           danceSegments,
@@ -1285,13 +1285,14 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
           feedbackEvents: eventsRef.current,
           sessionAnalysis,
       });
+      window.dispatchEvent(new Event("fitcoach:session-saved"));
       if (data?.coachAgent) {
         setPostSessionAgent(data.coachAgent);
         setAgentReport(data.coachAgent);
       }
 
       const topIssues = Array.from(new Set(eventsRef.current.filter((event) => event.severity !== "info").map((event) => event.message))).slice(0, 6);
-      const topStrengths = framesRef.current.length ? [scoring.form >= 80 ? "Form quality stayed strong for most reps." : "", scoring.rom >= 80 ? "Range of motion was consistent." : "", scoring.safety >= 85 ? "Movement stayed safe and controlled." : ""].filter(Boolean) : [];
+      const topStrengths = framesRef.current.length ? [scoring.form >= 80 ? "Form quality stayed strong for most reps." : "", scoring.rom >= 80 ? "Range of motion was consistent." : "", ""].filter(Boolean) : [];
       const curlEvidence = exerciseIdRef.current === "bicep_curl" ? summarizeCurlEvidence(curlRepScorecardsRef.current) : undefined;
       let nextCurlMemory = curlCoachMemory;
       if (curlEvidence?.totalReps) {
@@ -1325,14 +1326,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         setSummary(summaryData.summary || "");
         setSummaryInsights(Array.isArray(summaryData.keyInsights) ? summaryData.keyInsights : []);
         setSummaryPractice(Array.isArray(summaryData.nextSessionFocus) ? summaryData.nextSessionFocus : []);
-        if (summaryData.techniqueScorecard && typeof summaryData.techniqueScorecard === "object") {
-          setTechniqueScorecard({
-            elbowPath: Number(summaryData.techniqueScorecard.elbowPath ?? 0),
-            rangeOfMotion: Number(summaryData.techniqueScorecard.rangeOfMotion ?? 0),
-            tempoControl: Number(summaryData.techniqueScorecard.tempoControl ?? 0),
-            torsoStability: Number(summaryData.techniqueScorecard.torsoStability ?? 0),
-          });
-        }
+        // Narrative refinement cannot replace camera-derived scores.
+
         setTopMistakes(Array.isArray(summaryData.topMistakes) ? summaryData.topMistakes : []);
         setCorrectivePlan(Array.isArray(summaryData.correctivePlan5Min) ? summaryData.correctivePlan5Min : []);
       }
@@ -1443,7 +1438,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       notes: ["Land the shoulder hit slightly earlier on count two."],
       metrics: {
         poseShape: { key: "poseShape", label: "Hip-hop shape", score: 78, status: "warning", reliable: true, detail: "Arms match the phrase shape with small timing drift.", target: "Clear hit on counts 2 and 4" },
-        grooveBounce: { key: "grooveBounce", label: "Groove bounce", score: 74, status: "warning", reliable: true, detail: "Bounce is present but uneven between counts.", target: "Even down-up pulse" },
+        grooveBounce: { key: "grooveBounce", label: "Knee bend", score: 74, status: "warning", reliable: true, detail: "Bounce is present but uneven between counts.", target: "Even down-up pulse" },
         armHits: { key: "armHits", label: "Arm hits", score: 76, status: "warning", reliable: true, detail: "Hits are readable but need sharper stops.", target: "Stop cleanly on accented counts" },
         torsoControl: { key: "torsoControl", label: "Torso control", score: 82, status: "pass", reliable: true, detail: "Torso stays stable through the groove.", target: "Stable chest line" },
         timing: { key: "timing", label: "Beat timing", score: 72, status: "warning", reliable: true, detail: "You are slightly late on the transition.", target: "Arrive inside phrase window" },
@@ -1462,6 +1457,9 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   };
 
   useEffect(() => {
+    routineAudioRef.current?.stop();
+    danceMotionRef.current.reset();
+    calibrationTimerRef.current.reset();
     exerciseIdRef.current = exerciseId;
     exerciseRef.current = exercise;
     if (exerciseId === "bicep_curl" && curlDemoActive) return;
@@ -1474,8 +1472,14 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     curlFrameHistoryRef.current = [];
     curlRepScorecardsRef.current = [];
     setCalibrationHoldProgress(0);
-    calibrationHoldFramesRef.current = 0;
+    calibrationHoldMsRef.current = 0;
   }, [curlDemoActive, exercise, exerciseId]);
+
+  useEffect(() => {
+    const hide = () => { if (document.hidden) { routineAudioRef.current?.stop(); danceMotionRef.current.reset(); } };
+    document.addEventListener("visibilitychange", hide);
+    return () => { document.removeEventListener("visibilitychange", hide); routineAudioRef.current?.stop(); };
+  }, []);
 
   useEffect(() => {
     profileRef.current = profile;
@@ -1557,80 +1561,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     };
   }, [mode]);
 
-  useEffect(() => {
-    return () => {
-      stopCamera();
-      voiceRef.current.stop();
-      if (threeStateRef.current) {
-        try {
-          threeStateRef.current.renderer.dispose();
-          threeStateRef.current.jointMeshes.forEach((mesh: any) => {
-            mesh.geometry.dispose();
-            if (mesh.material) {
-              if (Array.isArray(mesh.material)) {
-                mesh.material.forEach((m: any) => m.dispose());
-              } else {
-                mesh.material.dispose();
-              }
-            }
-          });
-          threeStateRef.current.lineSegments.geometry.dispose();
-          if (threeStateRef.current.lineSegments.material) {
-            const mat = threeStateRef.current.lineSegments.material;
-            if (Array.isArray(mat)) {
-              mat.forEach((m: any) => m.dispose());
-            } else {
-              mat.dispose();
-            }
-          }
-          threeStateRef.current.gridHelper.geometry.dispose();
-          if (threeStateRef.current.gridHelper.material) {
-            const mat = threeStateRef.current.gridHelper.material;
-            if (Array.isArray(mat)) {
-              mat.forEach((m: any) => m.dispose());
-            } else {
-              mat.dispose();
-            }
-          }
-        } catch {}
-        threeStateRef.current = null;
-      }
-      if (replayThreeStateRef.current) {
-        try {
-          replayThreeStateRef.current.renderer.dispose();
-          replayThreeStateRef.current.jointMeshes.forEach((mesh: any) => {
-            mesh.geometry.dispose();
-            if (mesh.material) {
-              if (Array.isArray(mesh.material)) {
-                mesh.material.forEach((m: any) => m.dispose());
-              } else {
-                mesh.material.dispose();
-              }
-            }
-          });
-          replayThreeStateRef.current.lineSegments.geometry.dispose();
-          if (replayThreeStateRef.current.lineSegments.material) {
-            const mat = replayThreeStateRef.current.lineSegments.material;
-            if (Array.isArray(mat)) {
-              mat.forEach((m: any) => m.dispose());
-            } else {
-              mat.dispose();
-            }
-          }
-          replayThreeStateRef.current.gridHelper.geometry.dispose();
-          if (replayThreeStateRef.current.gridHelper.material) {
-            const mat = replayThreeStateRef.current.gridHelper.material;
-            if (Array.isArray(mat)) {
-              mat.forEach((m: any) => m.dispose());
-            } else {
-              mat.dispose();
-            }
-          }
-        } catch {}
-        replayThreeStateRef.current = null;
-      }
-    };
-  }, []);
+  useEffect(() => () => { stopCamera(); voiceRef.current.stop(); }, []);
+  useEffect(() => () => {
+    disposeThreeHUD(threeStateRef.current); threeStateRef.current = null;
+    disposeThreeHUD(replayThreeStateRef.current); replayThreeStateRef.current = null;
+  }, [hudMode]);
 
   useEffect(() => {
     try {
@@ -1639,14 +1574,6 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       if (stored) setCurlCoachMemory(JSON.parse(stored) as CurlCoachMemory);
     } catch {}
   }, [curlMemoryKey]);
-
-  useEffect(() => {
-    initParticlesEngine(async (engine) => {
-      await loadSlim(engine);
-    }).then(() => {
-      setParticlesInit(true);
-    });
-  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1660,11 +1587,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         recognition.continuous = true;
         recognition.interimResults = false;
         recognition.lang = "en-US";
-        
+
         recognition.onresult = (event: any) => {
           const last = event.results.length - 1;
           const text = event.results[last][0].transcript.toLowerCase().trim();
-          
+
           if (text.includes("start session") || text.includes("start workout") || text.includes("begin session")) {
             toast.success("Voice command: Starting session");
             startSession();
@@ -1707,7 +1634,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         replayThreeCanvasRef.current.height = replayOverlayRef.current.height || 360;
 
         if (!replayThreeStateRef.current) {
-          replayThreeStateRef.current = initThreeHUD(replayThreeCanvasRef.current);
+          try { replayThreeStateRef.current = initThreeHUD(replayThreeCanvasRef.current); }
+          catch { setHudMode("2d"); return; }
         }
 
         const targetW = replayOverlayRef.current.width || 640;
@@ -1737,8 +1665,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   }, [replayFrameIndex, running, hudMode]);
 
   const qualityPercent = useMemo(() => Math.round(confidence.avgVisibility * 100), [confidence.avgVisibility]);
-  const requiredCalibrationFrames = calibrationFramesForExercise(exerciseId);
-  const calibrationReady = cameraOn && confidence.ready && calibrationHoldProgress >= requiredCalibrationFrames && (exerciseId !== "bicep_curl" || !!curlBaseline?.ready);
+  const requiredCalibrationMs = calibrationMsForExercise(exerciseId);
+  const calibrationReady = cameraOn && confidence.ready && calibrationHoldProgress >= requiredCalibrationMs && (exerciseId !== "bicep_curl" || !!curlBaseline?.ready);
   const calibrationMessage =
     exerciseId === "bicep_curl" && cameraOn
       ? curlBaseline?.ready
@@ -1746,7 +1674,9 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         : "Keep shoulders, elbows, wrists, and hips visible to finish curl calibration."
       : exerciseId === "dance_basic" && cameraOn
         ? calibrationReady ? "Ready for the packaged starter routine." : confidence.message
-      : confidence.ready && calibrationHoldProgress < requiredCalibrationFrames
+      : ["squat", "lunge"].includes(exerciseId) && confidence.view === "front" && cameraOn
+        ? "Front view: alignment feedback only. Turn to an angled or side view for knee bend and rep counting."
+      : confidence.ready && calibrationHoldProgress < requiredCalibrationMs
         ? "Hold steady so the coach can lock onto your setup."
         : confidence.message;
   const activeDanceCheckpoint = useMemo(() => getActiveDanceCheckpoint(danceRoutine, seconds * 1000), [danceRoutine, seconds]);
@@ -1765,8 +1695,9 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       scorecardLabels(exerciseId).map((item) => ({
         label: item.label,
         score: scorecard[item.valueKey],
+        available: exerciseId === "dance_basic" ? Boolean(danceComparison?.metrics[({elbowPath: "poseShape", rangeOfMotion: "grooveBounce", tempoControl: "timing", torsoStability: "torsoControl"} as const)[item.valueKey]].reliable) : analysis.scoreAvailability?.[({elbowPath: "form", rangeOfMotion: "rom", tempoControl: "tempo", torsoStability: "stability"} as const)[item.valueKey]] !== false && (running || framesRef.current.length > 0),
       })),
-    [exerciseId, scorecard],
+    [exerciseId, scorecard, danceComparison, analysis.scoreAvailability, running],
   );
   const primaryMetrics = useMemo(() => analysis.metrics.slice(0, 6), [analysis.metrics]);
   const mlMistakeRows = useMemo(
@@ -1794,8 +1725,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     if (mode === "dance") {
       return {
         label: "Hip-hop phrase timing",
-        target: "Hit the count inside the phrase window",
-        measuredValue: "Beat timing and transition score",
+        target: "Start movement on the audio beat",
+        measuredValue: "Detected movement onset and signed beat offset",
         cue: "Count the starter groove out loud and land the arm hit on the beat.",
       };
     }
@@ -1806,15 +1737,15 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     if (metric) {
       return {
         label: metric.name,
-        measured: metric.value != null ? `${Math.round(metric.value)}` : `${metric.score}/100`,
+        measured: metric.reliable === false ? "Unavailable" : metric.value != null ? `${Math.round(metric.value)}` : `${metric.score}/100`,
         target: metric.target ?? "Stay in the safe target range",
       };
     }
     if (danceComparison) {
       return {
         label: "Beat timing",
-        measured: `${danceComparison.timingScore}/100`,
-        target: "Arrive inside the phrase window",
+        measured: danceComparison.metrics.timing.reliable ? `${danceComparison.timingOffsetMs ?? 0} ms from beat` : "Timing unavailable",
+        target: "Move on the nearest audio beat",
       };
     }
     return {
@@ -1855,17 +1786,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       void cameraControllerRef.current?.setFacingMode(next).then(() => { setCameraFacing(next); setMirror(next === "user"); }).catch(() => toast.error("Camera could not be switched"));
     }}>Switch to {cameraFacing === "user" ? "rear" : "front"} camera</Button>
 
-    <div
-      className={cn(
-        "relative overflow-hidden rounded-[28px] border bg-black shadow-[0_30px_100px_rgba(0,0,0,0.45)] transition-all duration-500",
-        streakCount >= 5
-          ? "border-border shadow-[0_0_35px_rgba(217,70,239,0.5)] scale-[1.01]"
-          : streakCount >= 3
-            ? "border-border shadow-[0_0_25px_rgba(6,182,212,0.4)]"
-            : "border-border",
-        cameraLayout === "portrait" ? "aspect-[3/4]" : "aspect-video",
-      )}
-    >
+    <div className="min-w-0 rounded-xl bg-secondary">
+      <div className={cn("relative isolate overflow-hidden rounded-xl bg-black", cameraLayout === "portrait" ? "aspect-[3/4]" : "aspect-video")}>
       <video
         ref={videoRef}
         autoPlay
@@ -1876,13 +1798,6 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       <canvas ref={overlayRef} data-testid="pose-overlay" className="pointer-events-none absolute inset-0 h-full w-full object-contain z-20" />
       {hudMode === "3d" && (
         <canvas ref={threeCanvasRef} className="pointer-events-none absolute inset-0 h-full w-full z-10" />
-      )}
-      {showSparks && particlesInit && sparkPosition && (
-        <Particles
-          id="joint-sparks"
-          className="absolute inset-0 h-full w-full pointer-events-none z-30"
-          options={particlesConfig as any}
-        />
       )}
       {exerciseId === "bicep_curl" && curlReferenceOverlay ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center"><div className="relative" style={cameraGuideStyle}>
@@ -1895,36 +1810,35 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         </div></div>
       ) : null}
 
-      <div className="pointer-events-none absolute left-4 top-4 flex flex-wrap gap-2">
-        <Badge className="bg-background/80 text-foreground">{exercise.label}</Badge>
-        <Badge className={cn("border-none text-white", confidence.ready ? "bg-primary/90" : "bg-amber-500/90")}>
-          {confidence.frameQuality === "ready" ? "Ready" : confidence.frameQuality.replaceAll("_", " ")}
-        </Badge>
-        <Badge className="bg-background/80 text-foreground">{confidence.view}</Badge>
-        <Badge className="bg-background/80 text-foreground">{fps} FPS</Badge>
-        <Badge className={cn("border-none text-white", text(analysis.overall).replace("text-", "bg-").replace("400", "500/90"))}>
-          Score {analysis.overall}
-        </Badge>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 pt-3 text-sm text-foreground">
+        <span>{exercise.label}</span>
+        <span>{confidence.frameQuality === "ready" ? "Ready" : confidence.frameQuality.replaceAll("_", " ")}</span>
+        <span>{confidence.view} view</span>
+        <span>{fps} analysis fps</span>
+        <span>Score {running || framesRef.current.length ? analysis.overall : "unavailable"}</span>
       </div>
 
-      <div className="absolute right-4 top-4 z-30 flex items-center gap-1 rounded-full border border-border bg-background/80 p-0.5 backdrop-blur">
+      <div className="flex flex-wrap items-center gap-2 px-4 pt-3" role="group" aria-label="Pose overlay mode">
         <button
+          aria-pressed={hudMode === "2d"}
           onClick={() => setHudMode("2d")}
           className={cn(
-            "rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider uppercase transition-all duration-300 cursor-pointer",
+            "rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
             hudMode === "2d"
-              ? "bg-primary text-primary-foreground shadow-sm"
+              ? "bg-primary text-primary-foreground"
               : "text-muted-foreground hover:text-foreground"
           )}
         >
           2D HUD
         </button>
         <button
+          aria-pressed={hudMode === "3d"}
           onClick={() => setHudMode("3d")}
           className={cn(
-            "rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider uppercase transition-all duration-300 cursor-pointer",
+            "rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
             hudMode === "3d"
-              ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(6,182,212,0.4)]"
+              ? "bg-primary text-primary-foreground"
               : "text-muted-foreground hover:text-foreground"
           )}
         >
@@ -1933,14 +1847,14 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       </div>
 
       {trackingPausedReason ? (
-        <div className="pointer-events-none absolute inset-x-4 top-16 rounded-2xl border border-amber-500/40 bg-background/85 p-3 text-sm text-warning">
+        <div className="mx-4 mt-3 rounded-lg bg-background p-3 text-sm text-warning">
           <p className="font-medium">{unreliableCameraGuidance?.title ?? "Tracking paused"}</p>
           <p className="mt-1">{unreliableCameraGuidance?.message ?? trackingPausedReason}</p>
         </div>
       ) : null}
 
       {!running ? (
-        <div className="absolute inset-x-4 bottom-4">
+        <div className="p-4">
           <SessionSetupCard
             cameraOn={cameraOn}
             loading={loading}
@@ -1964,26 +1878,26 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       ) : null}
 
       {running ? (
-        <div className="absolute inset-x-4 bottom-4 flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-background/85 px-4 py-3 text-sm text-foreground backdrop-blur">
-          <div className="flex items-center gap-2 rounded-full bg-card px-3 py-1.5">
+        <div className="flex flex-wrap items-center gap-2 p-4 text-sm text-foreground">
+          <div className="flex items-center gap-2 px-1 py-1.5">
             <Timer className="h-4 w-4 text-primary" />
             <span>{seconds}s</span>
           </div>
-          <div className="flex items-center gap-2 rounded-full bg-card px-3 py-1.5">
+          <div className="flex items-center gap-2 px-1 py-1.5">
             <Zap className="h-4 w-4 text-orange-300" />
             <span>{repsRef.current} reps</span>
           </div>
-          <div className="flex items-center gap-2 rounded-full bg-card px-3 py-1.5">
+          <div className="flex items-center gap-2 px-1 py-1.5">
             <Waves className="h-4 w-4 text-primary" />
-            <span>{calories} kcal</span>
+            <span>Est. {calories} kcal</span>
           </div>
-          <div className="flex items-center gap-2 rounded-full bg-card px-3 py-1.5">
+          <div className="flex items-center gap-2 px-1 py-1.5">
             <Target className="h-4 w-4 text-primary" />
-            <span>Score {analysis.overall}</span>
+            <span>Score {running || framesRef.current.length ? analysis.overall : "unavailable"}</span>
           </div>
-          <div className="flex items-center gap-2 rounded-full bg-card px-3 py-1.5">
+          <div className="flex items-center gap-2 px-1 py-1.5">
             <CheckCircle2 className="h-4 w-4 text-primary" />
-            <span>{qualityPercent}% reliable</span>
+            <span>{qualityPercent}% visible</span>
           </div>
           <div className="ml-auto flex flex-wrap gap-2">
             <Button size="sm" variant="outline" className="border-border bg-card text-foreground" onClick={() => setMirror((value) => !value)}>
@@ -2007,7 +1921,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
               {cameraViewMode === "pip" ? <Maximize2 className="h-4 w-4" /> : <Minimize2 className="h-4 w-4" />}
               PiP
             </Button>
-            <Button size="sm" className="bg-rose-500 text-white hover:bg-rose-600" onClick={() => void stopSession()}>
+            <Button size="sm" className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => void stopSession()}>
               Stop session
             </Button>
           </div>
@@ -2020,14 +1934,14 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-6 sm:px-6 xl:px-8">
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.8fr)_minmax(360px,1fr)]">
-          <div className="space-y-4">
+        <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]">
+          <div className="min-w-0 space-y-4">
             <Card className="border-border bg-background/70 text-foreground">
-              <CardHeader className="pb-4">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                  <div>
-                    <Badge className="mb-3">{mode === "dance" ? "Dance coach" : "Workout coach"}</Badge>
-                    <CardTitle className="text-4xl font-black uppercase">{exercise.label}</CardTitle>
+              <CardHeader className="min-w-0 pb-4">
+                <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                  <div className="min-w-0">
+
+                    <CardTitle className="text-2xl font-semibold sm:text-3xl">{exercise.label}</CardTitle>
                     <CardDescription className="mt-2 max-w-3xl text-muted-foreground">{exerciseDescription}</CardDescription>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -2099,7 +2013,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
           onPointerMove={onPipPointerMove}
           onPointerUp={onPipPointerUp}
         >
-          <div className={cn(cameraViewMode === "pip" && "overflow-hidden rounded-[28px] border border-border bg-background/95 shadow-[0_30px_100px_rgba(0,0,0,0.55)] backdrop-blur")}>
+          <div className={cn(cameraViewMode === "pip" && "overflow-y-auto rounded-xl bg-background shadow-sm")} style={cameraViewMode === "pip" ? { maxHeight: `calc(100dvh - ${pipPos.y + 16}px)` } : undefined}>
             <div className={cn("items-center justify-between border-b border-border px-4 py-3 text-sm text-foreground", cameraViewMode === "pip" ? "flex" : "hidden")}>
               <button type="button" className="flex items-center gap-2" onPointerDown={onPipPointerDown}>
                 <GripVertical className="h-4 w-4 text-muted-foreground" />
@@ -2133,7 +2047,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
             ) : null}
           </div>
 
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             <Card className="border-border bg-background/70 text-foreground">
               <CardHeader>
                 <CardTitle>Live feedback</CardTitle>
@@ -2150,28 +2064,28 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                 </div>
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="rounded-2xl border border-border bg-card/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Primary correction</p>
+                    <p className="text-sm font-medium text-muted-foreground">Primary correction</p>
                     <p className="mt-2 text-sm text-foreground">
                       {unreliableCameraGuidance ? "Fix camera reliability first." : analysis.corrections[0] ?? danceComparison?.primaryIssue ?? sessionFocusMetric?.cue ?? "Hold steady and keep the rhythm controlled."}
                     </p>
                   </div>
                   <div className="rounded-2xl border border-border bg-card/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Measured value</p>
+                    <p className="text-sm font-medium text-muted-foreground">Measured value</p>
                     <p className="mt-2 text-sm font-medium text-foreground">{livePrimaryMetric.label}</p>
                     <p className="mt-1 text-sm text-foreground">{livePrimaryMetric.measured}</p>
                   </div>
                   <div className="rounded-2xl border border-border bg-card/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Target range</p>
+                    <p className="text-sm font-medium text-muted-foreground">Target range</p>
                     <p className="mt-2 text-sm text-foreground">{livePrimaryMetric.target}</p>
                   </div>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="rounded-2xl border border-border bg-card/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">What is right</p>
+                    <p className="text-sm font-medium text-muted-foreground">What is right</p>
                     <p className="mt-2 text-sm text-foreground">{analysis.positives[0] ?? "Hold the current shape and keep the rhythm stable."}</p>
                   </div>
                   <div className="rounded-2xl border border-border bg-card/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Fix now</p>
+                    <p className="text-sm font-medium text-muted-foreground">Fix now</p>
                     <p className="mt-2 text-sm text-foreground">{unreliableCameraGuidance ? unreliableCameraGuidance.reason : analysis.corrections[0] ?? analysis.targetCue ?? "No immediate correction. Stay consistent."}</p>
                   </div>
                 </div>
@@ -2230,12 +2144,12 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
               <CardContent className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-2xl border border-border bg-card/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Frame quality</p>
+                    <p className="text-sm font-medium text-muted-foreground">Frame quality</p>
                     <p className="mt-2 text-lg font-semibold capitalize">{confidence.frameQuality.replaceAll("_", " ")}</p>
                     <p className="mt-2 text-sm text-muted-foreground">{confidence.message}</p>
                   </div>
                   <div className="rounded-2xl border border-border bg-card/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Camera profile</p>
+                    <p className="text-sm font-medium text-muted-foreground">Camera profile</p>
                     <p className="mt-2 text-lg font-semibold">{cameraProfileLabel}</p>
                     <p className="mt-2 text-sm text-muted-foreground">Allowed views: {confidence.allowedViews.join(", ")}</p>
                   </div>
@@ -2243,7 +2157,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                 <div className="space-y-3">
                   <div>
                     <div className="mb-2 flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Tracking confidence</span>
+                      <span className="text-muted-foreground">Joint visibility</span>
                       <span className="font-medium text-foreground">{qualityPercent}%</span>
                     </div>
                     <Progress value={qualityPercent} className="h-2 bg-secondary" />
@@ -2253,10 +2167,16 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                     <div className="rounded-xl border border-border bg-card/60 px-3 py-2">Brightness: <span className="font-medium text-foreground">{Math.round(confidence.brightness)}</span></div>
                     <div className="rounded-xl border border-border bg-card/60 px-3 py-2">Motion: <span className="font-medium text-foreground">{confidence.motion.toFixed(1)}</span></div>
                   </div>
+                  <p className="text-xs leading-5 text-muted-foreground" aria-label="Measured tracking performance">
+                    Analysis: {fps} fps. Camera setting: {trackingRuntime.captureFps != null ? `${Math.round(trackingRuntime.captureFps)} fps` : "unavailable"}.
+                    {trackingRuntime.inferenceMs != null ? ` Inference: ${Math.round(trackingRuntime.inferenceMs)} ms. Frame age: ${Math.round(trackingRuntime.ageMs ?? 0)} ms.` : ""}
+                    {trackingRuntime.model ? ` MediaPipe ${trackingRuntime.model}, ${trackingRuntime.delegate ?? "delegate unavailable"}.` : ""}
+                    {" "}Joint visibility is a model estimate, not a calibrated accuracy probability.
+                  </p>
                 </div>
                 {exerciseId === "bicep_curl" ? (
                   <div className="rounded-2xl border border-border bg-card/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Curl setup wizard</p>
+                    <p className="text-sm font-medium text-muted-foreground">Curl setup wizard</p>
                     <div className="mt-3 grid gap-2">
                       {setupSteps.map((step) => (
                         <div key={step.label} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-background/60 px-3 py-2">
@@ -2275,95 +2195,6 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                 ) : null}
               </CardContent>
             </Card>
-
-            {/* Muscle Engagement Heatmap HUD Card */}
-            {running && (
-              <Card className="border-border bg-background/70 text-foreground">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold tracking-wider text-foreground">MUSCLE ENGAGEMENT HUD</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>Active Movers</span>
-                    <span>Intensity: {Math.min(100, repsRef.current * 10)}%</span>
-                  </div>
-                  <div className="flex items-center justify-center gap-6 rounded-2xl border border-border bg-card/40 p-4">
-                    <svg viewBox="0 0 100 160" className="h-28 w-20 drop-shadow-[0_0_10px_rgba(0,0,0,0.55)]">
-                      <circle cx="50" cy="18" r="10" className="fill-zinc-800/60 stroke-zinc-700/50" />
-                      <rect
-                        x="38"
-                        y="38"
-                        width="24"
-                        height="42"
-                        rx="4"
-                        className={cn(
-                          "transition-all duration-500",
-                          exerciseId === "plank" || exerciseId === "pushup" || exerciseId === "squat" || exerciseId === "lunge"
-                            ? Math.min(100, repsRef.current * 10) >= 80
-                              ? "fill-rose-500/80 stroke-rose-400 animate-pulse"
-                              : Math.min(100, repsRef.current * 10) >= 50
-                                ? "fill-orange-500/70 stroke-orange-400"
-                                : Math.min(100, repsRef.current * 10) >= 20
-                                  ? "fill-amber-500/60 stroke-amber-400"
-                                  : "fill-yellow-500/45 stroke-yellow-400/60"
-                            : "fill-zinc-800/40 stroke-zinc-700/50"
-                        )}
-                      />
-                      <path
-                        d="M34,42 L24,65 L18,85 M66,42 L76,65 L82,85"
-                        fill="none"
-                        strokeWidth="6"
-                        strokeLinecap="round"
-                        className={cn(
-                          "transition-all duration-500",
-                          exerciseId === "bicep_curl" || exerciseId === "pushup" || exerciseId === "plank"
-                            ? Math.min(100, repsRef.current * 10) >= 80
-                              ? "stroke-rose-500/80 animate-pulse"
-                              : Math.min(100, repsRef.current * 10) >= 50
-                                ? "stroke-orange-500/70"
-                                : Math.min(100, repsRef.current * 10) >= 20
-                                  ? "stroke-amber-500/60"
-                                  : "stroke-yellow-500/45"
-                            : "stroke-zinc-800/40"
-                        )}
-                      />
-                      <path
-                        d="M42,80 L38,115 L36,150 M58,80 L62,115 L64,150"
-                        fill="none"
-                        strokeWidth="7"
-                        strokeLinecap="round"
-                        className={cn(
-                          "transition-all duration-500",
-                          exerciseId === "squat" || exerciseId === "lunge" || exerciseId === "jumping_jack" || exerciseId === "warrior"
-                            ? Math.min(100, repsRef.current * 10) >= 80
-                              ? "stroke-rose-500/80 animate-pulse"
-                              : Math.min(100, repsRef.current * 10) >= 50
-                                ? "stroke-orange-500/70"
-                                : Math.min(100, repsRef.current * 10) >= 20
-                                  ? "stroke-amber-500/60"
-                                  : "stroke-yellow-500/45"
-                            : "stroke-zinc-800/40"
-                        )}
-                      />
-                    </svg>
-                    <div className="flex flex-col gap-1.5 text-[11px] text-foreground">
-                      <div className="flex items-center gap-2">
-                        <span className={cn("h-2.5 w-2.5 rounded-full", exerciseId === "bicep_curl" || exerciseId === "pushup" ? "bg-rose-400 animate-pulse" : "bg-secondary")} />
-                        <span>Arms / Chest</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={cn("h-2.5 w-2.5 rounded-full", exerciseId === "plank" || exerciseId === "pushup" ? "bg-amber-400" : "bg-secondary")} />
-                        <span>Core Stabilizers</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={cn("h-2.5 w-2.5 rounded-full", exerciseId === "squat" || exerciseId === "lunge" ? "bg-primary" : "bg-secondary")} />
-                        <span>Legs (Quads/Glutes)</span>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
 
             <Card className="border-border bg-background/70 text-foreground">
               <CardHeader>
@@ -2421,10 +2252,10 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                     <div key={item.label} className="rounded-2xl border border-border bg-card/60 p-4">
                       <div className="flex items-center justify-between">
                         <p className="text-sm text-muted-foreground">{item.label}</p>
-                        <span className={cn("text-sm font-semibold", text(item.score))}>{item.score}</span>
+                        <span className={cn("text-sm font-semibold", text(item.score))}>{item.available ? item.score : "Unavailable"}</span>
                       </div>
                       <div className="mt-3 h-2 overflow-hidden rounded-full bg-secondary">
-                        <div className={cn("h-full rounded-full bg-gradient-to-r", bar(item.score))} style={{ width: `${Math.max(4, item.score)}%` }} />
+                        <div className="h-full rounded-full bg-primary" style={{ width: `${item.available ? item.score : 0}%` }} />
                       </div>
                     </div>
                   ))}
@@ -2437,7 +2268,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                           <p className="text-sm font-medium text-foreground">{metric.name}</p>
                           <p className="text-xs text-muted-foreground">{metric.detail}</p>
                         </div>
-                        <span className={cn("text-sm font-semibold", text(metric.score))}>{metric.score}</span>
+                        <span className={cn("text-sm font-semibold", text(metric.score))}>{metric.reliable === false ? "Unavailable" : metric.score}</span>
                       </div>
                     </div>
                   ))}
@@ -2446,7 +2277,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   <div className="rounded-2xl border border-border bg-card/60 p-4">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Curl accuracy</p>
+                        <p className="text-sm font-medium text-muted-foreground">Curl accuracy</p>
                         <p className="mt-2 text-sm text-foreground">
                           {curlBaseline?.ready
                             ? `Baseline locked at ${Math.round(curlBaseline.confidence * 100)}% confidence.`
@@ -2515,7 +2346,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                           </div>
                         ))}
                         <div className="mt-4 overflow-x-auto rounded-xl border border-border bg-background/60 p-3">
-                          <p className="mb-3 text-xs uppercase tracking-[0.24em] text-muted-foreground">Rep timeline heatmap</p>
+                          <p className="mb-3 text-sm font-medium text-muted-foreground">Rep timeline heatmap</p>
                           <div className="grid min-w-[640px] gap-2" style={{ gridTemplateColumns: "80px repeat(8, minmax(64px, 1fr))" }}>
                             <div className="text-xs text-muted-foreground">Rep</div>
                             {(["elbowPath", "shoulderStability", "torsoStability", "wristStack", "topFinish", "bottomExtension", "tempo", "symmetry"] as CurlMetricKey[]).map((key) => (
@@ -2546,7 +2377,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   <div className="rounded-2xl border border-border bg-card/60 p-4">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Squat accuracy</p>
+                        <p className="text-sm font-medium text-muted-foreground">Squat accuracy</p>
                         <p className="mt-2 text-sm text-foreground">Rep scorecards track depth, knee tracking, torso stack, hip centering, symmetry, shoulder stability, and tempo.</p>
                       </div>
                       {squatEvidence?.totalReps ? <Badge className="w-fit bg-primary/15 text-primary">{squatEvidence.totalReps} scored reps</Badge> : null}
@@ -2573,7 +2404,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                     ) : null}
                     {squatRepScorecards.length ? (
                       <div className="mt-4 overflow-x-auto rounded-xl border border-border bg-background/60 p-3">
-                        <p className="mb-3 text-xs uppercase tracking-[0.24em] text-muted-foreground">Squat rep heatmap</p>
+                        <p className="mb-3 text-sm font-medium text-muted-foreground">Squat rep heatmap</p>
                         <div className="grid min-w-[620px] gap-2" style={{ gridTemplateColumns: "80px repeat(7, minmax(70px, 1fr))" }}>
                           <div className="text-xs text-muted-foreground">Rep</div>
                           {(["depth", "kneeTracking", "torsoStack", "hipCentering", "symmetry", "shoulderStability", "tempo"] as SquatMetricKey[]).map((key) => (
@@ -2601,12 +2432,12 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                 ) : null}
                 {liveIssues.length ? (
                   <div className="rounded-2xl border border-border bg-card/60 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Active issue history</p>
+                    <p className="text-sm font-medium text-muted-foreground">Active issue history</p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {liveIssues.map((issue) => (
-                        <Badge key={issue} variant="outline" className="border-border text-foreground">
+                        <p key={issue} className="min-w-0 break-words text-sm text-foreground">
                           {issue}
-                        </Badge>
+                        </p>
                       ))}
                     </div>
                   </div>
@@ -2618,9 +2449,18 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
               <Card className="border-border bg-background/70 text-foreground">
                 <CardHeader>
                   <CardTitle>Hip-hop routine sync</CardTitle>
-                  <CardDescription className="text-muted-foreground">Packaged phrase checkpoints drive pose shape, groove bounce, timing, and transition scoring.</CardDescription>
+                  <CardDescription className="text-muted-foreground">Starter checkpoints guide pose shape. Audio beats and detected movement provide timing evidence.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  <div role="group" className="flex flex-wrap items-center gap-4 rounded-xl bg-secondary p-4" aria-label="Routine audio transport">
+                    <div className="min-w-36 flex-1">
+                      <p className="text-sm font-medium">{routineAudioState === "playing" ? `Count ${routineBeat} of 8` : "Routine audio"}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{routineAudioState === "playing" ? `${danceRoutine?.bpm ?? 96} BPM. Timing follows the audio clock.` : routineAudioState === "starting" ? "Starting audio..." : "Start a session to play the beat. Silent practice has no timing score."}</p>
+                    </div>
+                    <Button variant="secondary" disabled={!running || routineAudioState === "starting"} onClick={() => routineAudioState === "playing" ? routineAudioRef.current?.stop() : startRoutineAudio()}>
+                      {routineAudioState === "playing" ? "Stop routine audio" : "Play routine audio"}
+                    </Button>
+                  </div>
                   <div className="rounded-2xl border border-border bg-card/60 p-4">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <p className="text-sm font-medium text-foreground">{danceRoutine?.name ?? "Loading routine"}</p>
@@ -2629,13 +2469,14 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                     <p className="mt-1 text-sm text-muted-foreground">{activeDanceCheckpoint?.step.cue ?? "Waiting for the first phrase."}</p>
                   </div>
                   {danceTraining ? <DanceCoachSkeleton training={danceTraining} /> : null}
+                  {danceComparison?.metrics.timing.reliable && danceComparison.timingOffsetMs != null ? <p className="text-sm">Estimated movement onset: {Math.abs(danceComparison.timingOffsetMs)} ms {danceComparison.timingOffsetMs < 0 ? "before" : "after"} the nearest beat. Sampling uncertainty: ±{danceComparison.timingUncertaintyMs ?? 0} ms, excluding camera and audio hardware delay.</p> : null}
                   {danceComparison ? (
                     <>
-                      <div className="grid gap-3 sm:grid-cols-4">
-                        <div className="rounded-2xl border border-border bg-card/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Shape</p><p className="mt-2 text-2xl font-semibold">{danceComparison.poseSimilarity}</p></div>
-                        <div className="rounded-2xl border border-border bg-card/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Timing</p><p className="mt-2 text-2xl font-semibold">{danceComparison.timingScore}</p></div>
-                        <div className="rounded-2xl border border-border bg-card/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Transition</p><p className="mt-2 text-2xl font-semibold">{danceComparison.transitionQuality}</p></div>
-                        <div className="rounded-2xl border border-border bg-card/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Reliability</p><p className="mt-2 text-2xl font-semibold">{danceComparison.reliability}%</p></div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl border border-border bg-card/60 p-4"><p className="text-sm font-medium text-muted-foreground">Shape</p><p className="mt-2 text-2xl font-semibold">{danceComparison.poseSimilarity}</p></div>
+                        <div className="min-w-0 rounded-2xl bg-card/60 p-4"><p className="text-sm text-muted-foreground">Timing</p><p data-testid="dance-timing-score" className="mt-2 break-words text-lg font-semibold">{danceComparison.metrics.timing.reliable ? danceComparison.timingScore : "Unavailable"}</p></div>
+                        <div className="rounded-2xl border border-border bg-card/60 p-4"><p className="text-sm font-medium text-muted-foreground">Transition</p><p className="mt-2 text-2xl font-semibold">{danceComparison.metrics.transition.reliable ? danceComparison.transitionQuality : "Unavailable"}</p></div>
+                        <div className="rounded-2xl border border-border bg-card/60 p-4"><p className="text-sm font-medium text-muted-foreground">Reliability</p><p className="mt-2 text-2xl font-semibold">{danceComparison.reliability}%</p></div>
                       </div>
                       <div className="grid gap-3 sm:grid-cols-2">
                         {Object.values(danceComparison.metrics).map((metric) => (
@@ -2653,7 +2494,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                       </div>
                       {danceComparison.notes.length ? (
                         <div className="rounded-2xl border border-border bg-primary/10 p-4">
-                          <p className="text-xs uppercase tracking-[0.24em] text-primary">Primary hip-hop correction</p>
+                          <p className="text-sm font-medium text-primary">Primary hip-hop correction</p>
                           <p className="mt-2 text-sm text-foreground">{danceComparison.notes[0]}</p>
                         </div>
                       ) : null}
@@ -2686,25 +2527,25 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   {summary ? <p className="text-sm leading-6 text-foreground">{summary}</p> : null}
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="rounded-2xl border border-border bg-primary/10 p-4">
-                      <p className="text-xs uppercase tracking-[0.24em] text-primary">What improved</p>
+                      <p className="text-sm font-medium text-primary">What improved</p>
                       <p className="mt-2 text-sm text-foreground">
                         {summaryInsights[0] ?? (analysis.positives[0] || "The session is saved, so the coach has stronger evidence for the next recommendation.")}
                       </p>
                     </div>
                     <div className="rounded-2xl border border-rose-500/25 bg-rose-500/10 p-4">
-                      <p className="text-xs uppercase tracking-[0.24em] text-destructive">What failed most</p>
+                      <p className="text-sm font-medium text-destructive">What failed most</p>
                       <p className="mt-2 text-sm text-foreground">
                         {topMistakes[0]?.mistake ?? summaryPractice[0] ?? sessionFocusMetric?.label ?? "No repeated failed metric was detected."}
                       </p>
                     </div>
                     <div className="rounded-2xl border border-border bg-primary/10 p-4">
-                      <p className="text-xs uppercase tracking-[0.24em] text-primary">Next action</p>
+                      <p className="text-sm font-medium text-primary">Next action</p>
                       <p className="mt-2 text-sm text-foreground">
                         {postSessionAgent?.postSessionNextAction?.nextAction ?? agentReport?.postSessionNextAction?.nextAction ?? summaryPractice[0] ?? "Repeat this module once more with one correction focus."}
                       </p>
                     </div>
                     <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4">
-                      <p className="text-xs uppercase tracking-[0.24em] text-warning">Achievement progress</p>
+                      <p className="text-sm font-medium text-warning">Achievement progress</p>
                       <p className="mt-2 text-sm text-foreground">
                         {(postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement)
                           ? `${(postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement)?.name}: ${(postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement)?.progress}/${(postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement)?.threshold}. ${(postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement)?.nextAction}`
@@ -2760,7 +2601,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                     <div className="rounded-2xl border border-border bg-primary/10 p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div>
-                          <p className="text-xs uppercase tracking-[0.24em] text-primary">Teacher report card</p>
+                          <p className="text-sm font-medium text-primary">Teacher report card</p>
                           <p className="mt-2 text-sm text-foreground">
                             {curlEvidence.totalReps} reps, average {curlEvidence.averageScore}, best rep {curlEvidence.bestRep}, worst rep {curlEvidence.worstRep}.{" "}
                             {curlEvidence.recurringFailedMetrics.length ? `Practice ${curlEvidence.recurringFailedMetrics[0].toLowerCase()} next.` : "No repeated failed metric."}
@@ -2789,7 +2630,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   ) : null}
                   {summaryInsights.length ? (
                     <div>
-                      <p className="mb-2 text-xs uppercase tracking-[0.24em] text-muted-foreground">Key insights</p>
+                      <p className="mb-2 text-sm font-medium text-muted-foreground">Key insights</p>
                       <div className="space-y-2">
                         {summaryInsights.map((item) => (
                           <div key={item} className="rounded-xl border border-border bg-card/60 px-3 py-2 text-sm text-foreground">{item}</div>
@@ -2799,7 +2640,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   ) : null}
                   {topMistakes.length ? (
                     <div>
-                      <p className="mb-2 text-xs uppercase tracking-[0.24em] text-muted-foreground">Top mistakes</p>
+                      <p className="mb-2 text-sm font-medium text-muted-foreground">Top mistakes</p>
                       <div className="space-y-2">
                         {topMistakes.map((item) => (
                           <div key={item.mistake} className="rounded-xl border border-border bg-card/60 p-3">
@@ -2813,7 +2654,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   ) : null}
                   {correctivePlan.length ? (
                     <div>
-                      <p className="mb-2 text-xs uppercase tracking-[0.24em] text-muted-foreground">5 minute corrective block</p>
+                      <p className="mb-2 text-sm font-medium text-muted-foreground">5 minute corrective block</p>
                       <div className="space-y-2">
                         {correctivePlan.map((item) => (
                           <div key={`${item.minuteRange}-${item.drill}`} className="rounded-xl border border-border bg-card/60 p-3">
@@ -2826,7 +2667,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   ) : null}
                   {summaryPractice.length ? (
                     <div>
-                      <p className="mb-2 text-xs uppercase tracking-[0.24em] text-muted-foreground">Next session focus</p>
+                      <p className="mb-2 text-sm font-medium text-muted-foreground">Next session focus</p>
                       <div className="space-y-2">
                         {summaryPractice.map((item) => (
                           <div key={item} className="rounded-xl border border-border bg-card/60 px-3 py-2 text-sm text-foreground">{item}</div>
@@ -2848,22 +2689,24 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   </div>
                   <div className="flex items-center gap-1 rounded-full border border-border bg-background/80 p-0.5 backdrop-blur shrink-0 mt-0.5">
                     <button
-                      onClick={() => setHudMode("2d")}
+                      aria-pressed={hudMode === "2d"}
+          onClick={() => setHudMode("2d")}
                       className={cn(
-                        "rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider uppercase transition-all duration-300 cursor-pointer",
+                        "rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
                         hudMode === "2d"
-                          ? "bg-primary text-primary-foreground shadow-sm"
+                          ? "bg-primary text-primary-foreground"
                           : "text-muted-foreground hover:text-foreground"
                       )}
                     >
                       2D HUD
                     </button>
                     <button
-                      onClick={() => setHudMode("3d")}
+                      aria-pressed={hudMode === "3d"}
+          onClick={() => setHudMode("3d")}
                       className={cn(
-                        "rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider uppercase transition-all duration-300 cursor-pointer",
+                        "rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
                         hudMode === "3d"
-                          ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(6,182,212,0.4)]"
+                          ? "bg-primary text-primary-foreground"
                           : "text-muted-foreground hover:text-foreground"
                       )}
                     >

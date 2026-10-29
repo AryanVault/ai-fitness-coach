@@ -9,6 +9,7 @@ import { toJson } from "@/lib/utils/json";
 import { ApiError } from "@/lib/server/api";
 import { loadPrimaryDanceRoutinePack } from "@/lib/dance/routine-pack";
 import { recordDanceCourseAttempt } from "@/lib/server/dance-course";
+import { hasDanceTimingEvidence } from "@/lib/dance/course-rules";
 
 export function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
@@ -124,7 +125,9 @@ export async function saveWorkoutSession(userId: string, data: z.infer<typeof wo
     if (data.type === "dance" && data.danceSegments.length) {
       const routine = await loadPrimaryDanceRoutinePack();
       for (const segment of data.danceSegments) {
+        const phrase = routine.segments.find(item => item.id === segment.id);
         await recordDanceCourseAttempt(userId, {
+          eligibleForCompletion: data.modelEvidence?.analysisVersion === "movement-engine-v3" ? Boolean(phrase && hasDanceTimingEvidence({ timingEvents: segment.timingEvents, observedDurationMs: segment.observedDurationMs, phraseDurationMs: phrase.endMs - phrase.startMs })) : undefined,
           routineId: routine.id,
           segmentId: segment.id,
           mode: "full_routine",

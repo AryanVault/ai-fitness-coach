@@ -72,6 +72,20 @@ function buildLandmarks() {
 }
 
 describe("dance comparator", () => {
+  it("does not award timing to a stationary frame at the phrase midpoint", () => {
+    const result = compareDanceFrame({ landmarks: buildLandmarks(), routine, elapsedMs: 5000, analysis: baseAnalysis });
+    expect(result?.metrics.timing.reliable).toBe(false);
+    expect(result?.timingScore).toBe(0);
+  });
+
+  it("keeps every pose metric invariant to camera distance", () => {
+    const landmarks = buildLandmarks();
+    const scaled = landmarks.map(p => ({ ...p, x: .5 + (p.x - .5) * .65, y: .5 + (p.y - .5) * .65 }));
+    const a = compareDanceFrame({ landmarks, routine, elapsedMs: 2000, analysis: baseAnalysis })!;
+    const b = compareDanceFrame({ landmarks: scaled, routine, elapsedMs: 2000, analysis: baseAnalysis })!;
+    expect(b.metrics.armHits.score).toBe(a.metrics.armHits.score);
+    expect(b.poseSimilarity).toBe(a.poseSimilarity);
+  });
   it("scores a matching frame against the active segment", () => {
     const comparison = compareDanceFrame({
       landmarks: buildLandmarks(),

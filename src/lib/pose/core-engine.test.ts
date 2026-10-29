@@ -157,7 +157,7 @@ function trackingFrame(options: {
     trackingConfidence: options.confidence ?? 0.96,
     frameQuality: ready,
     frameQualityMessage: ready === "ready" ? "Ready." : "Body is not fully visible.",
-    view: options.exerciseId === "squat" ? "front" : "angled",
+    view: "angled",
     viewMessage: "Camera angle is valid.",
     brightness: 92,
     motion: 1,

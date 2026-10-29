@@ -27,12 +27,13 @@ function setSquatLeg(landmarks: Landmark[], side: "left" | "right", kneeAngle: n
 
 function buildSquatLandmarks(kneeAngle: number, visibility = 0.99) {
   const landmarks = createLandmarks();
-  landmarks[11] = { x: 0.4, y: 0.22, z: -0.02, visibility };
-  landmarks[12] = { x: 0.6, y: 0.22, z: 0.02, visibility };
+  landmarks[11] = { x: 0.4, y: 0.22, z: -0.07, visibility };
+  landmarks[12] = { x: 0.6, y: 0.22, z: 0.07, visibility };
   landmarks[15] = { x: 0.32, y: 0.38, visibility };
   landmarks[16] = { x: 0.68, y: 0.38, visibility };
   setSquatLeg(landmarks, "left", kneeAngle, visibility);
   setSquatLeg(landmarks, "right", kneeAngle, visibility);
+  landmarks[23].z = -.035; landmarks[24].z = .035;
   return landmarks;
 }
 
@@ -68,12 +69,12 @@ function buildCurlLandmarks(angleDeg: number, elbowOffset = 0) {
 describe("replay harness", () => {
   it("does not count reps while frame quality is paused and resumes once tracking recovers", () => {
     const frames = [
-      ...Array.from({ length: 6 }, (_, index) => ({ timestampMs: index * 140, landmarks: buildSquatLandmarks(170), brightness: 80 })),
-      ...Array.from({ length: 4 }, (_, index) => ({ timestampMs: 840 + index * 140, landmarks: buildSquatLandmarks(170, 0.2), brightness: 80 })),
-      ...Array.from({ length: 4 }, (_, index) => ({ timestampMs: 1400 + index * 140, landmarks: buildSquatLandmarks(170), brightness: 80 })),
-      ...Array.from({ length: 6 }, (_, index) => ({ timestampMs: 1960 + index * 140, landmarks: buildSquatLandmarks(118), brightness: 80 })),
-      ...Array.from({ length: 6 }, (_, index) => ({ timestampMs: 2800 + index * 140, landmarks: buildSquatLandmarks(98), brightness: 80 })),
-      ...Array.from({ length: 7 }, (_, index) => ({ timestampMs: 3640 + index * 140, landmarks: buildSquatLandmarks(168), brightness: 80 })),
+      ...Array.from({ length: 6 }, (_, index) => ({ timestampMs: index * 100, landmarks: buildSquatLandmarks(170), brightness: 80 })),
+      ...Array.from({ length: 4 }, (_, index) => ({ timestampMs: 600 + index * 100, landmarks: buildSquatLandmarks(170, 0.2), brightness: 80 })),
+      ...Array.from({ length: 4 }, (_, index) => ({ timestampMs: 1000 + index * 100, landmarks: buildSquatLandmarks(170), brightness: 80 })),
+      ...Array.from({ length: 6 }, (_, index) => ({ timestampMs: 1400 + index * 100, landmarks: buildSquatLandmarks(118), brightness: 80 })),
+      ...Array.from({ length: 6 }, (_, index) => ({ timestampMs: 2000 + index * 100, landmarks: buildSquatLandmarks(98), brightness: 80 })),
+      ...Array.from({ length: 7 }, (_, index) => ({ timestampMs: 2600 + index * 100, landmarks: buildSquatLandmarks(168), brightness: 80 })),
     ];
 
     const result = runReplayFixture({
@@ -88,7 +89,7 @@ describe("replay harness", () => {
 
   it("emits stable bicep curl cues from deterministic metric evidence", () => {
     const frames = Array.from({ length: 10 }, (_, index) => ({
-      timestampMs: index * 140,
+      timestampMs: index * 100,
       landmarks: buildCurlLandmarks(166, 0.08),
       brightness: 82,
     }));

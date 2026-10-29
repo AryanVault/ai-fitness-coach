@@ -35,6 +35,12 @@ export type TrackingFrame = {
   timestampMs: number;
   frameIndex: number;
   fps: number;
+  captureFps?: number;
+  inferenceLatencyMs?: number;
+  frameAgeMs?: number;
+  modelQuality?: "full" | "lite";
+  delegate?: "GPU" | "CPU";
+  poseCount?: number;
   rawLandmarks: Landmark[];
   smoothedLandmarks: Landmark[];
   analysisLandmarks?: Landmark[];
@@ -88,6 +94,7 @@ export type SessionTelemetryEvent = {
 };
 
 export type SessionFramePoint = {
+  scoreAvailability?: Partial<Record<import("./score-evidence").ScoreKey, boolean>>;
   timestampMs: number;
   overall: number;
   form: number;
@@ -114,6 +121,8 @@ export type SessionPhasePoint = {
 };
 
 export type SessionPostSetAnalysis = {
+  availability?: Partial<Record<"stabilityAverage" | "asymmetryAverage" | "tempoDrift" | "fatigueDrop" | "consistencyAverage", boolean>>;
+  interpretation?: string;
   stabilityAverage: number;
   asymmetryAverage: number;
   tempoDrift: number;
@@ -167,6 +176,8 @@ export type ConfidenceStatus = {
 };
 
 export type FrameAnalysis = {
+  analysisVersion?: "movement-engine-v3";
+  scoreAvailability?: Partial<Record<import("./score-evidence").ScoreKey, boolean>>;
   form: number;
   rom: number;
   tempo: number;

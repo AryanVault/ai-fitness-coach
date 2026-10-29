@@ -1,9 +1,10 @@
 import { angle, average, distance, midpoint } from "@/lib/pose/math";
-import type { ExerciseId, Landmark, SafetyResult } from "@/lib/pose/types";
+import type { CameraView, ExerciseId, Landmark, SafetyResult } from "@/lib/pose/types";
+import { REQUIRED_BY_EXERCISE } from "@/lib/pose/quality";
 
 const L = (landmarks: Landmark[], index: number) => landmarks[index];
 
-export function evaluateSafety(exerciseId: ExerciseId, landmarks: Landmark[], injuries: string[] = []): SafetyResult {
+export function evaluateSafety(exerciseId: ExerciseId, landmarks: Landmark[], injuries: string[] = [], view?: CameraView): SafetyResult {
   const messages: string[] = [];
   let blocked = false;
   let severity: SafetyResult["severity"] = "info";
@@ -32,7 +33,12 @@ export function evaluateSafety(exerciseId: ExerciseId, landmarks: Landmark[], in
     messages.push("Shoulder-sensitive profile: keep movement pain-free and reduce range if needed.");
   }
 
-  if (exerciseId === "squat" && leftShoulder && rightShoulder && leftHip && rightHip && leftKnee && rightKnee) {
+  if (REQUIRED_BY_EXERCISE[exerciseId].some(index => !landmarks[index] || (landmarks[index].visibility ?? 0) < .45)) {
+    return { blocked, severity, messages: messages.length ? messages : ["Posture cues unavailable until the required joints are visible."] };
+  }
+  const sagittalVisible = view === undefined || view === "side" || view === "angled";
+
+  if (exerciseId === "squat" && sagittalVisible && leftShoulder && rightShoulder && leftHip && rightHip && leftKnee && rightKnee) {
     const torsoCenter = midpoint(leftShoulder, rightShoulder);
     const hipCenter = midpoint(leftHip, rightHip);
     const kneeCenter = midpoint(leftKnee, rightKnee);
@@ -51,7 +57,7 @@ export function evaluateSafety(exerciseId: ExerciseId, landmarks: Landmark[], in
     }
   }
 
-  if (exerciseId === "lunge" && leftHip && leftKnee && leftAnkle) {
+  if (exerciseId === "lunge" && sagittalVisible && leftHip && leftKnee && leftAnkle) {
     const kneeAngle = angle(leftHip, leftKnee, leftAnkle);
     if (kneeAngle < 70) {
       severity = "warning";
@@ -116,7 +122,7 @@ export function evaluateSafety(exerciseId: ExerciseId, landmarks: Landmark[], in
     const rightKneeAngle = angle(rightHip, rightKnee, rightAnkle);
     const averageKneeAngle = average([leftKneeAngle, rightKneeAngle]);
 
-    if (averageKneeAngle > 175) {
+    if (sagittalVisible && averageKneeAngle > 175) {
       severity = "warning";
       messages.push("Your knees are locking on the beat. Keep them soft so the joints do not take the impact.");
     }
@@ -144,6 +150,6 @@ export function evaluateSafety(exerciseId: ExerciseId, landmarks: Landmark[], in
   return {
     blocked,
     severity,
-    messages: messages.length ? messages : ["No major safety concerns detected."],
+    messages: messages.length ? messages : ["No additional posture cue from the visible joints."],
   };
 }

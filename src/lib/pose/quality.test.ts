@@ -37,6 +37,13 @@ function widenRequiredPoints(landmarks: Landmark[]) {
 }
 
 describe("frame quality evaluation", () => {
+  it("explains marginal visibility instead of saying ready while calibration is blocked", () => {
+    const landmarks = createLandmarks(); setFrontBody(landmarks);
+    for(const landmark of landmarks) landmark.visibility = .55;
+    const result = evaluateFrameQuality({exerciseId:"squat",landmarks,worldLandmarks:[],fps:24,brightness:82,motion:0});
+    expect(result.ready).toBe(false); expect(result.pauseTracking).toBe(true);
+    expect(result.message).not.toMatch(/^Ready/);
+  });
   it("marks a clean front-facing squat setup as ready", () => {
     const landmarks = createLandmarks();
     setFrontBody(landmarks);
@@ -137,7 +144,7 @@ describe("frame quality evaluation", () => {
       exerciseId: "squat",
       landmarks,
       worldLandmarks: landmarks,
-      fps: 10,
+      fps: 6,
       brightness: 82,
       motion: 1,
     });

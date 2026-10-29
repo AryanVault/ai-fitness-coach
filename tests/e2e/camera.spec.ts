@@ -49,6 +49,7 @@ test("worker initializes with GPU disabled, transfers frames, and releases camer
 test("preview layout, PiP and minimization preserve capture and save on navigation",async({page,baseURL})=>{
  test.skip(process.env.E2E_REAL_DATABASE!=="true"||!!process.env.PLAYWRIGHT_USE_BUILD,"Requires isolated database and local auth");
  test.setTimeout(180000);
+ page.setDefaultTimeout(10000);
  const origin=new URL(baseURL||"http://127.0.0.1:3100").origin;
  const signup=await page.request.post("/api/auth/sign-up/email",{headers:{origin},data:{email:`preview-${crypto.randomUUID()}@example.test`,password:"Test-only-fitness-123!",name:"Preview Test"}});expect(signup.ok()).toBeTruthy();
  try {
@@ -79,7 +80,9 @@ test("preview layout, PiP and minimization preserve capture and save on navigati
   await expect(preview.locator("video")).toHaveCSS("object-fit","contain");
   await expect(page.getByTestId("pose-overlay")).toHaveCSS("object-fit","contain");
   await preview.getByRole("button",{name:"PiP",exact:true}).click();
-  await page.getByRole("button",{name:"Minimize camera preview",exact:true}).click();
+  const minimize=page.getByRole("button",{name:"Minimize camera preview",exact:true});
+  await expect(minimize).toBeInViewport();
+  await minimize.click();
   const before=await page.evaluate(()=>(window as any).__previewCheck.frames);
   await expect.poll(()=>page.evaluate(()=>(window as any).__previewCheck.frames)).toBeGreaterThan(before+3);
   await page.getByRole("button",{name:"Restore camera",exact:true}).click();

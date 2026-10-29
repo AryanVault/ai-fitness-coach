@@ -46,6 +46,8 @@ Duration: ${workout.duration ?? 0} minutes
 Calories: ${workout.caloriesBurned ?? 0}
 Composite score: ${workout.compositeScore ?? 0}
 Breakdown: ${workout.scoringBreakdown ?? "none"}
+Analysis evidence and score availability: ${workout.modelEvidence ?? "legacy session: availability not recorded"}
+For movement-engine-v3, use only scores marked available. An unavailable compatibility value of 0 is not a failed measurement. Score drift does not establish physiological fatigue or injury risk.
 Frame quality stats: ${workout.frameQualityStats ?? "none"}
 Issue history: ${workout.issueHistory ?? "none"}
 Phase history: ${workout.phaseHistory ?? "none"}

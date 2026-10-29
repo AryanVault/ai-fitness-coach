@@ -236,6 +236,9 @@ export const workoutPlanCreateSchema = z.object({
 export const workoutSessionInputSchema = z.object({
   clientSessionId: z.string().uuid(),
   modelEvidence: z.object({
+    analysisVersion: z.literal("movement-engine-v3").optional(),
+    scoreAvailability: z.record(z.enum(["form", "rom", "tempo", "stability", "symmetry", "consistency", "endurance", "safety", "overall"]), z.boolean()).optional(),
+    runtime: z.object({ provider: z.literal("mediapipe"), model: z.enum(["full", "lite"]).optional(), delegate: z.enum(["GPU", "CPU"]).optional(), inferenceP50Ms: z.number().nonnegative(), inferenceP95Ms: z.number().nonnegative(), sampleCount: z.number().int().nonnegative().max(600) }).optional(),
     artifactVersion: z.string().max(120), featureVersion: z.string().max(120),
     source: z.enum(["heuristic", "learned"]).optional(),
     calibratedConfidence: z.number().min(0).max(1).nullable().optional(),
@@ -280,6 +283,8 @@ export const workoutSessionInputSchema = z.object({
         overall: z.number().min(0).max(100),
         timing: z.number().min(0).max(100).default(0),
         transition: z.number().min(0).max(100).default(0),
+        timingEvents: z.number().int().nonnegative().max(10000).optional(),
+        observedDurationMs: z.number().nonnegative().max(43200000).optional(),
         reliability: z.number().min(0).max(100).default(80),
       }),
     )
@@ -359,6 +364,8 @@ export const workoutSessionInputSchema = z.object({
         .default([]),
       postSet: z
         .object({
+          availability: z.record(z.enum(["stabilityAverage", "asymmetryAverage", "tempoDrift", "fatigueDrop", "consistencyAverage"]), z.boolean()).optional(),
+          interpretation: z.string().max(300).optional(),
           stabilityAverage: z.number().min(0).max(100).default(0),
           asymmetryAverage: z.number().min(0).max(100).default(0),
           tempoDrift: z.number().min(-100).max(100).default(0),

@@ -5,6 +5,10 @@ import type { DanceRoutinePack, DanceTutorialStep } from "@/lib/dance/types";
 export const DANCE_PASS_SCORE = 80;
 export const DANCE_PASS_RELIABILITY = 70;
 
+export function hasDanceTimingEvidence(input: { timingEvents?: number; observedDurationMs?: number; phraseDurationMs: number }) {
+  return (input.timingEvents ?? 0) >= 3 && (input.observedDurationMs ?? 0) >= input.phraseDurationMs * .6;
+}
+
 export type DanceCourseStatus = "not_started" | "practicing" | "completed";
 
 export type DanceProgressLike = {

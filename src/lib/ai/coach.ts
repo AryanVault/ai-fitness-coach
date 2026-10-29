@@ -471,7 +471,7 @@ Previous reliability: ${input.curlCoachMemory.reliabilityAverage}`
    - rangeOfMotion (use this key for arm lines and body levels)
    - tempoControl (use this key for beat timing and phrase accuracy)
    - torsoStability (use this key for torso stack and hip control)
-6) topMistakes as exactly 3 items, each:
+6) topMistakes as 0-3 items supported by recorded reliable evidence. Return an empty array when no mistake is established. Each item:
    - mistake
    - whyItHurtsPerformance
    - exactFix
@@ -532,7 +532,7 @@ ${input.sessionSummary}`
    - rangeOfMotion
    - tempoControl
    - torsoStability
-6) topMistakes as exactly 3 items, each:
+6) topMistakes as 0-3 items supported by recorded reliable evidence. Return an empty array when no mistake is established. Each item:
    - mistake
    - whyItHurtsPerformance
    - exactFix
@@ -642,47 +642,10 @@ ${input.sessionSummary}`;
     keyInsights:
       (whatWentRight.length ? whatWentRight : []).concat(whatWentWrong.length ? [`Fix next: ${whatWentWrong[0]}`] : []).slice(0, 3).length
         ? (whatWentRight.length ? whatWentRight : []).concat(whatWentWrong.length ? [`Fix next: ${whatWentWrong[0]}`] : []).slice(0, 3)
-        : ["Form and consistency were the main themes."],
-    nextSessionFocus: practicePlan.length ? practicePlan : ["Keep technique stable under fatigue."],
+        : [],
+    nextSessionFocus: practicePlan.length ? practicePlan : ["Review reliable measurements before choosing the next practice focus."],
     techniqueScorecard,
-    topMistakes:
-      topMistakes.length === 3
-        ? topMistakes
-        : isDance
-          ? [
-              {
-                mistake: "Frame width collapses inward",
-                whyItHurtsPerformance: "Makes the phrase read small and unclear.",
-                exactFix: "Reach both wrists wider and match the arm line before dropping into the groove.",
-              },
-              {
-                mistake: "Timing lands late on the hit",
-                whyItHurtsPerformance: "Makes the move look reactive instead of musical.",
-                exactFix: "Prepare one count early and arrive on the beat, not after it.",
-              },
-              {
-                mistake: "Knees lock and torso drifts",
-                whyItHurtsPerformance: "Kills bounce and pushes stress into the low back and knees.",
-                exactFix: "Keep a soft bend in both knees and stack ribs over hips throughout the phrase.",
-              },
-            ]
-          : [
-            {
-              mistake: "Elbows drifting from the torso",
-              whyItHurtsPerformance: "Reduces bicep isolation and consistency.",
-              exactFix: "Keep elbows pinned and reduce load if needed.",
-            },
-            {
-              mistake: "Shortening the bottom range",
-              whyItHurtsPerformance: "Lowers total tension and progression quality.",
-              exactFix: "Reach near-full extension with control each rep.",
-            },
-            {
-              mistake: "Using torso momentum",
-              whyItHurtsPerformance: "Shifts work away from target muscles.",
-              exactFix: "Brace core and slow eccentric to 3 seconds.",
-            },
-          ],
+    topMistakes,
     correctivePlan5Min:
       correctivePlan5Min.length === 3
         ? correctivePlan5Min

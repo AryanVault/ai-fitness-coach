@@ -1,7 +1,7 @@
 import { average, distance } from "@/lib/pose/math";
 import type { CameraView, ConfidenceStatus, ExerciseContract, ExerciseId, FrameQualityState, Landmark } from "@/lib/pose/types";
 
-const REQUIRED_BY_EXERCISE: Record<ExerciseId, number[]> = {
+export const REQUIRED_BY_EXERCISE: Record<ExerciseId, number[]> = {
   squat: [11, 12, 23, 24, 25, 26, 27, 28],
   pushup: [11, 13, 15, 23, 25, 27],
   lunge: [11, 12, 23, 24, 25, 26, 27, 28],
@@ -14,8 +14,8 @@ const REQUIRED_BY_EXERCISE: Record<ExerciseId, number[]> = {
 
 export const EXERCISE_VIEW_POLICIES: Record<ExerciseId, ExerciseContract["viewPolicy"]> = {
   squat: {
-    allowedViews: ["front", "angled"],
-    prompt: "Stand front-on or at a 30-45 degree angle so hips, knees, and ankles stay visible.",
+    allowedViews: ["front", "angled", "side"],
+    prompt: "Use an angled or side view for depth, or face the camera for knee alignment. Keep hips, knees, and ankles visible.",
     requireFullBody: true,
   },
   bicep_curl: {
@@ -23,8 +23,8 @@ export const EXERCISE_VIEW_POLICIES: Record<ExerciseId, ExerciseContract["viewPo
     prompt: "Use a front or slightly angled view so both elbows and wrists stay visible.",
   },
   lunge: {
-    allowedViews: ["front", "angled"],
-    prompt: "Use a front or slightly angled view and keep both legs in frame.",
+    allowedViews: ["front", "angled", "side"],
+    prompt: "Use an angled or side view for knee bend and rep counting. A front view shows alignment only.",
     requireFullBody: true,
   },
   jumping_jack: {
@@ -60,21 +60,20 @@ function visibility(landmark?: Landmark | null) {
 }
 
 export function inferCameraView(landmarks: Landmark[], worldLandmarks: Landmark[]) {
-  const leftShoulder = landmarks[11];
-  const rightShoulder = landmarks[12];
-  const leftHip = landmarks[23];
-  const rightHip = landmarks[24];
-  const shoulderWidth = distance(leftShoulder, rightShoulder);
-  const hipWidth = distance(leftHip, rightHip);
-  const averageWidth = average([shoulderWidth, hipWidth]);
-  const shoulderDepth = Math.abs((worldLandmarks[11]?.z ?? leftShoulder?.z ?? 0) - (worldLandmarks[12]?.z ?? rightShoulder?.z ?? 0));
-  const hipDepth = Math.abs((worldLandmarks[23]?.z ?? leftHip?.z ?? 0) - (worldLandmarks[24]?.z ?? rightHip?.z ?? 0));
-  const averageDepth = average([shoulderDepth, hipDepth]);
-
-  if (averageWidth < 0.05) return "unknown";
-  if (averageDepth < 0.06 && averageWidth > 0.14) return "front";
-  if (averageDepth > 0.11 || averageWidth < 0.11) return "side";
-  return "angled";
+  const indices = [11, 12, 23, 24];
+  if (indices.some(i => !landmarks[i] || (landmarks[i].visibility ?? 0) < .45)) return "unknown";
+  const points = indices.every(i => Number.isFinite(worldLandmarks[i]?.x) && Number.isFinite(worldLandmarks[i]?.y) && Number.isFinite(worldLandmarks[i]?.z)) ? worldLandmarks : landmarks;
+  const width = average([Math.abs(points[11].x - points[12].x), Math.abs(points[23].x - points[24].x)]);
+  const depth = average([Math.abs((points[11].z ?? 0) - (points[12].z ?? 0)), Math.abs((points[23].z ?? 0) - (points[24].z ?? 0))]);
+  if (width + depth < .0001) return "unknown";
+  if (indices.every(i => Number.isFinite(points[i].z))) {
+    const yaw = Math.atan2(depth, width) * 180 / Math.PI;
+    return yaw < 25 ? "front" : yaw > 65 ? "side" : "angled";
+  }
+  const torso = average([distance(landmarks[11], landmarks[23]), distance(landmarks[12], landmarks[24])]);
+  if (torso < .0001) return "unknown";
+  const ratio = width / torso;
+  return ratio < .3 ? "side" : ratio < .5 ? "angled" : "front";
 }
 
 type QualityInput = {
@@ -116,7 +115,7 @@ export function evaluateFrameQuality(input: QualityInput): ConfidenceStatus {
     frameQuality = "camera_lost";
     message = "Camera lost. Step back into frame.";
     reasons.push(message);
-  } else if (!fullBodyVisible) {
+  } else if (!fullBodyVisible || avgVisibility < .6) {
     frameQuality = avgVisibility < 0.3 ? "camera_lost" : avgVisibility < 0.5 ? "partial_body" : "occluded";
     message =
       frameQuality === "partial_body"
@@ -141,13 +140,9 @@ export function evaluateFrameQuality(input: QualityInput): ConfidenceStatus {
     frameQuality = "low_light";
     message = "Improve lighting on the front of your body so joints stay visible.";
     reasons.push(message);
-  } else if (input.fps < 15) {
+  } else if (!Number.isFinite(input.fps) || input.fps < 8) {
     frameQuality = "low_fps";
     message = "Tracking is running slow. Close other apps or switch to a lower camera quality.";
-    reasons.push(message);
-  } else if (input.motion > 9.5 && avgVisibility < 0.72) {
-    frameQuality = "motion_blur";
-    message = "Your movement is too blurred to coach reliably. Slow the rep and keep the body fully visible.";
     reasons.push(message);
   }
 

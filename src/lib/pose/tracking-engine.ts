@@ -1,7 +1,8 @@
 import { buildTrackingFrame, estimateMotion } from "@/lib/pose/confidence";
+import { createLandmarkFilter } from "@/lib/pose/landmark-filter";
 import type { ExerciseId, Landmark, SessionTelemetryEvent, TrackingFrame } from "@/lib/pose/types";
 import type { PoseWorkerReply, PoseWorkerRequest } from "@/lib/pose/tracking.worker";
-type CameraFrame = { video: HTMLVideoElement; timestampMs: number; frameIndex: number; fps: number; width?: number; height?: number };
+type CameraFrame = { video: HTMLVideoElement; timestampMs: number; frameIndex: number; fps: number; captureFps?: number; width?: number; height?: number };
 export function createPoseTrackingEngine(options: { onTelemetry?: (event: SessionTelemetryEvent) => void; onPerformance?: (latencyMs: number) => void }) {
   let worker: Worker | null = null;
   let initialized: Promise<void> | null = null;
@@ -15,6 +16,8 @@ export function createPoseTrackingEngine(options: { onTelemetry?: (event: Sessio
   let quality: "full" | "lite" = "full";
   let slowFrames = 0;
   let warmingUp = true;
+  const filter = createLandmarkFilter();
+  let previousExercise: ExerciseId | null = null;
   function request(message: Omit<PoseWorkerRequest, "id">, transfer: Transferable[] = []): Promise<PoseWorkerReply> {
     if (!worker || pending) return Promise.reject(new Error("Pose worker unavailable"));
     const requestId = ++id;
@@ -56,7 +59,7 @@ export function createPoseTrackingEngine(options: { onTelemetry?: (event: Sessio
     }
     return initialized;
   };
-  const reset = () => { generation++; previousRaw = null; previousSmoothed = null; previousTimestamp = 0; slowFrames = 0; };
+  const reset = () => { generation++; filter.reset(); previousExercise = null; previousRaw = null; previousSmoothed = null; previousTimestamp = 0; slowFrames = 0; };
   return {
     init,
     async processFrame(frame: CameraFrame, exerciseId: ExerciseId): Promise<TrackingFrame | null> {
@@ -76,8 +79,21 @@ export function createPoseTrackingEngine(options: { onTelemetry?: (event: Sessio
         options.onPerformance?.(reply.latencyMs ?? 0);
         const raw = reply.landmarks ?? [];
         if (raw.length !== 33 || raw.some(point=>!Number.isFinite(point.x)||!Number.isFinite(point.y)||(point.z!==undefined&&!Number.isFinite(point.z)))) { reset(); return null; }
-        if (previousTimestamp && (frame.timestampMs <= previousTimestamp || frame.timestampMs - previousTimestamp > 1000)) { previousRaw = null; previousSmoothed = null; }
-        const tracked = buildTrackingFrame({ exerciseId, rawLandmarks: raw, worldLandmarks: reply.worldLandmarks ?? [], imageAspectRatio, previousSmoothed, timestampMs: frame.timestampMs, frameIndex: frame.frameIndex, fps: frame.fps, brightness: reply.brightness ?? 80, motion: estimateMotion(previousRaw, raw) });
+        if (exerciseId !== previousExercise || (previousTimestamp && (frame.timestampMs <= previousTimestamp || frame.timestampMs - previousTimestamp > 500))) { filter.reset(); previousRaw = null; previousSmoothed = null; }
+        previousExercise = exerciseId;
+        const tracked = buildTrackingFrame({ exerciseId, rawLandmarks: raw, filteredLandmarks: filter.update(raw, frame.timestampMs), worldLandmarks: reply.worldLandmarks ?? [], imageAspectRatio, previousSmoothed, timestampMs: frame.timestampMs, frameIndex: frame.frameIndex, fps: frame.fps, brightness: reply.brightness ?? 80, motion: estimateMotion(previousRaw, raw) });
+        tracked.captureFps = frame.captureFps;
+        tracked.inferenceLatencyMs = reply.latencyMs;
+        tracked.frameAgeMs = Math.max(0, performance.now() - frame.timestampMs);
+        tracked.delegate = reply.delegate;
+        tracked.modelQuality = quality;
+        tracked.poseCount = reply.poseCount ?? 1;
+        if (tracked.poseCount > 1) {
+          filter.reset();
+          tracked.frameQuality = "occluded";
+          tracked.frameQualityMessage = "More than one person detected. Keep only the person training in frame.";
+          tracked.reliability = Object.fromEntries(Object.keys(tracked.reliability).map(key => [key, false]));
+        }
         previousRaw = raw; previousSmoothed = tracked.smoothedLandmarks; previousTimestamp = frame.timestampMs;
         slowFrames = (reply.latencyMs ?? 0) > 65 ? slowFrames + 1 : 0;
         if (slowFrames >= 30 && quality === "full") {

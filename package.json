@@ -37,7 +37,8 @@
     "prebuild": "npm run worker:build",
     "pretest:e2e": "npm run worker:build",
     "ml:extract": "node scripts/extract-posture-landmarks.mjs",
-    "preml:extract": "npm run worker:build"
+    "preml:extract": "npm run worker:build",
+    "camera:benchmark": "tsx scripts/benchmark-movement-engine.ts"
   },
   "dependencies": {
     "@babel/parser": "^7.28.4",

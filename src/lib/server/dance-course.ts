@@ -19,6 +19,7 @@ export type DanceCourseAttemptInput = {
   transitionScore?: number;
   durationSeconds?: number;
   notes?: string | null;
+  eligibleForCompletion?: boolean;
 };
 
 export function buildDemoDanceCourseState(routine: DanceRoutinePack) {
@@ -131,11 +132,11 @@ export async function recordDanceCourseAttempt(userId: string, input: DanceCours
   const now = new Date();
   const score = clampDanceScore(input.score);
   const reliability = clampDanceScore(input.reliability);
-  const completed = isDanceAttemptComplete(score, reliability);
+  const completed = input.eligibleForCompletion !== false && isDanceAttemptComplete(score, reliability);
 
   if (!isDatabaseConfigured) {
     const attempts = 1;
-    const status = resolveDanceCourseStatus({ score, reliability, attempts });
+    const status = completed ? "completed" : "practicing";
     return {
       completed,
       status,
@@ -174,7 +175,7 @@ export async function recordDanceCourseAttempt(userId: string, input: DanceCours
   const nextBestScore = Math.max(existing?.bestScore ?? 0, score);
   const nextBestReliability = Math.max(existing?.bestReliability ?? 0, reliability);
   const nextAttempts = (existing?.attempts ?? 0) + 1;
-  const nextStatus = resolveDanceCourseStatus({ score: nextBestScore, reliability: nextBestReliability, attempts: nextAttempts });
+  const nextStatus = existing?.status === "completed" || completed ? "completed" : "practicing";
   const completedAt = existing?.completedAt ?? (nextStatus === "completed" ? now : null);
 
   if (existing) {

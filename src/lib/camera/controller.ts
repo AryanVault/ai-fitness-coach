@@ -5,6 +5,7 @@ type CameraFrame = {
   timestampMs: number;
   frameIndex: number;
   fps: number;
+  captureFps?: number;
   width: number;
   height: number;
 };
@@ -20,7 +21,7 @@ type CameraControllerOptions = {
 const CAMERA_PROFILES: Record<CameraPreset, CameraProfile> = {
   desktop_hq: {
     preset: "desktop_hq",
-    label: "Desktop HQ",
+    label: "High detail (720p)",
     width: 1280,
     height: 720,
     frameRate: 30,
@@ -29,7 +30,7 @@ const CAMERA_PROFILES: Record<CameraPreset, CameraProfile> = {
   },
   desktop_balanced: {
     preset: "desktop_balanced",
-    label: "Desktop Balanced",
+    label: "Balanced (540p)",
     width: 960,
     height: 540,
     frameRate: 24,
@@ -38,7 +39,7 @@ const CAMERA_PROFILES: Record<CameraPreset, CameraProfile> = {
   },
   desktop_low: {
     preset: "desktop_low",
-    label: "Desktop Low",
+    label: "Light (360p)",
     width: 640,
     height: 360,
     frameRate: 20,
@@ -87,6 +88,7 @@ export function createCameraController(options: CameraControllerOptions) {
         timestampMs,
         frameIndex,
         fps: Math.round(1000 / delta),
+        captureFps: stream?.getVideoTracks()[0]?.getSettings?.().frameRate,
         width: video.videoWidth || profile.width,
         height: video.videoHeight || profile.height,
       });

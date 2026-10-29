@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { advancePhaseTracker, analyzeExercise, createPhaseTrackerState } from "@/lib/pose/exercises";
+import { buildTrackingFrame } from "@/lib/pose/confidence";
 import type { ExerciseId, Landmark } from "@/lib/pose/types";
 
 function createLandmarks() {
@@ -82,6 +83,37 @@ function countReps(exerciseId: ExerciseId, frames: Landmark[][], stepMs = 50) {
 }
 
 describe("pose exercise tracking", () => {
+  it("discards a too-fast loaded cycle when returning to the start position", () => {
+    const state = { ...createPhaseTrackerState(100), phase: "rising", candidatePhase: "top", candidateSince: 0, cycleLoaded: true, cycleArmed: true, cycleStartedAt: 100, lastObservedAt: 150 };
+    const result = advancePhaseTracker("squat", buildSquatLandmarks(170), state, 200);
+    expect(result.repCompleted).toBe(false);
+    expect(result.state.cycleLoaded).toBe(false);
+  });
+  it("requires a complete starting position before counting a partial rep", () => {
+    expect(countReps("squat", [...Array.from({length: 6}, () => buildSquatLandmarks(98)), ...Array.from({length: 8}, () => buildSquatLandmarks(170))])).toBe(0);
+  });
+
+  it("cannot join a loaded squat across missing joints or a timestamp gap", () => {
+    for (const interruption of ["hidden", "gap"] as const) {
+      let state = createPhaseTrackerState(); let t = 0; let reps = 0;
+      const step = (points: Landmark[]) => { t += 50; const update = advancePhaseTracker("squat", points, state, t); state = update.state; reps += Number(update.repCompleted); };
+      for(let i=0;i<6;i++) step(buildSquatLandmarks(170));
+      for(let i=0;i<6;i++) step(buildSquatLandmarks(98));
+      if (interruption === "gap") t += 1000;
+      else { const hidden = buildSquatLandmarks(98); hidden[27].visibility = 0; step(hidden); }
+      for(let i=0;i<8;i++) step(buildSquatLandmarks(170));
+      expect(reps).toBe(0);
+    }
+  });
+
+  it("limits front-view squat feedback to visible alignment, with no depth or rep credit", () => {
+    const landmarks = buildSquatLandmarks(98);
+    const tracked = { ...buildTrackingFrame({ exerciseId: "squat", rawLandmarks: landmarks, previousSmoothed: null, timestampMs: 100, frameIndex: 1, fps: 24, brightness: 80 }), view: "front" as const };
+    const result = analyzeExercise("squat", tracked, 0, undefined, "bottom");
+    expect(result.metrics.find(m => m.name === "Depth")?.reliable).toBe(false);
+    expect(result.scoreAvailability?.rom).toBe(false);
+    expect(advancePhaseTracker("squat", tracked, null, 100).repCompleted).toBe(false);
+  });
   it("does not overcount bicep curl reps under top-position jitter", () => {
     const frames = [
       ...Array.from({ length: 6 }, () => buildCurlLandmarks(168)),

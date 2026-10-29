@@ -38,6 +38,16 @@ describe.skipIf(!configured)("PostgreSQL integrity",()=>{
   const attempts=await db.select().from(danceCourseAttempts).where(eq(danceCourseAttempts.sourceSessionId,saved.sessionId));
   expect(attempts).toHaveLength(1);expect(attempts[0].routineId).toBe(routine.id);
  });
+ it("persists v3 score availability and does not complete a dance phrase without timing evidence",async()=>{
+  const routine=await loadPrimaryDanceRoutinePack();const segment=routine.segments[1];
+  const availability={form:true,rom:true,tempo:false,stability:true,symmetry:false,consistency:false,endurance:false,safety:false,overall:true};
+  const payload=workoutSessionInputSchema.parse({clientSessionId:crypto.randomUUID(),type:"dance",duration:1,modelEvidence:{analysisVersion:"movement-engine-v3",scoreAvailability:availability,artifactVersion:"heuristic-rules-v2",featureVersion:"isotropic-geometry-v2",evaluationStatus:"disabled",supportedFaults:[]},danceSegments:[{id:segment.id,label:segment.label,overall:99,reliability:99,timingEvents:0,observedDurationMs:10000}]});
+  const saved=await saveWorkoutSession(ids[0],payload);
+  const session=await db.query.workoutSessions.findFirst({where:eq(workoutSessions.id,saved.sessionId)});
+  expect(JSON.parse(session!.modelEvidence!)).toMatchObject({analysisVersion:"movement-engine-v3",scoreAvailability:{tempo:false}});
+  const attempts=await db.select().from(danceCourseAttempts).where(eq(danceCourseAttempts.sourceSessionId,saved.sessionId));
+  expect(attempts[0].completed).toBe(false);expect(attempts[0].score).toBe(99);
+ });
  it("authenticates backups before restoring and refuses overwriting populated tables",async()=>{
   const key=Buffer.alloc(32,4);const snapshot=await captureBackup(dbPool!,"test-schema");
   const envelope=encryptBackup(snapshot,key);expect(JSON.stringify(envelope)).not.toContain("example.test");

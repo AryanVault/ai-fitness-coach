@@ -30,7 +30,7 @@ export async function GET(request: Request) {
     const session = await requireServerSession(request);
     const routine = await loadRoutineWithTutorial();
     const course = await getDanceCourseState(session.user.id, routine, { demo: isDemoUser(session.user.id) });
-    return NextResponse.json({ routine, course });
+    return NextResponse.json({ routine, course, demo: isDemoUser(session.user.id) });
   } catch (error) {
     return apiError(error, request);
   }

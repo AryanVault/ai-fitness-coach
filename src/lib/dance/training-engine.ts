@@ -1,3 +1,5 @@
+import { referenceSegmentAt } from "@/lib/dance/reference";
+import type { DanceMotionEvidence } from "@/lib/dance/motion";
 import { compareDanceFrame } from "@/lib/dance/comparator";
 import type {
   DanceAiGuidanceRequest,
@@ -41,11 +43,6 @@ const DEFAULT_POINTS: Record<DanceSkeletonPointName, { x: number; y: number }> =
   leftAnkle: { x: -0.34, y: 2.55 },
   rightAnkle: { x: 0.34, y: 2.55 },
 };
-
-function segmentAt(routine: DanceRoutinePack, elapsedMs: number) {
-  const loopMs = routine.durationMs > 0 ? elapsedMs % routine.durationMs : elapsedMs;
-  return routine.segments.find((segment) => loopMs >= segment.startMs && loopMs < segment.endMs) ?? routine.segments[0];
-}
 
 function countLabel(index: number) {
   const labels = ["1-2", "3-4", "5-6", "7-8"];
@@ -140,18 +137,20 @@ export function evaluateHipHopTrainingFrame({
   landmarks,
   elapsedMs,
   analysis,
+  motion,
 }: {
   routine: DanceRoutinePack;
   landmarks: Landmark[];
   elapsedMs: number;
   analysis: FrameAnalysis;
+  motion?: DanceMotionEvidence;
 }): DanceTrainingFrameResult | null {
-  const segment = segmentAt(routine, elapsedMs);
+  const segment = referenceSegmentAt(routine, elapsedMs);
   if (!segment) return null;
 
   const tutorialStep = getTutorialStep(routine, segment);
   const referenceSkeleton = buildReferenceSkeleton(segment);
-  const comparison = compareDanceFrame({ landmarks, routine, elapsedMs, analysis });
+  const comparison = compareDanceFrame({ landmarks, routine, elapsedMs, analysis, motion });
   const primaryCorrection = comparison?.primaryIssue ?? tutorialStep.correction;
 
   return {
