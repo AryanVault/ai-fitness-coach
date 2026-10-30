@@ -28,7 +28,7 @@ export type CameraProfile = {
   height: number;
   frameRate: number;
   mirroredPreview: boolean;
-  facingMode: "user";
+  facingMode: "user" | "environment";
 };
 
 export type TrackingFrame = {
@@ -38,11 +38,14 @@ export type TrackingFrame = {
   captureFps?: number;
   inferenceLatencyMs?: number;
   frameAgeMs?: number;
-  modelQuality?: "full" | "lite";
-  delegate?: "GPU" | "CPU";
+  modelQuality?: import("./providers").ModelQuality;
+  provider?: import("./providers").PoseProvider;
+  delegate?: "GPU" | "CPU" | "WASM";
   poseCount?: number;
   rawLandmarks: Landmark[];
   smoothedLandmarks: Landmark[];
+  displayLandmarks?: Landmark[];
+  rejectedJoints?: number[];
   analysisLandmarks?: Landmark[];
   imageAspectRatio?: number;
   worldLandmarks: Landmark[];

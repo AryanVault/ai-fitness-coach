@@ -38,7 +38,9 @@
     "pretest:e2e": "npm run worker:build",
     "ml:extract": "node scripts/extract-posture-landmarks.mjs",
     "preml:extract": "npm run worker:build",
-    "camera:benchmark": "tsx scripts/benchmark-movement-engine.ts"
+    "camera:benchmark": "tsx scripts/benchmark-movement-engine.ts",
+    "tracking:prepare": "node scripts/prepare-tracking-models.mjs",
+    "tracking:benchmark": "tsx scripts/benchmark-tracking.ts"
   },
   "dependencies": {
     "@babel/parser": "^7.28.4",
@@ -81,6 +83,9 @@
     "@react-three/fiber": "^9.0.0-alpha.8",
     "@tabler/icons-react": "^3.35.0",
     "@tailwindcss/typography": "^0.5.16",
+    "@tensorflow/tfjs-backend-wasm": "^4.22.0",
+    "@tensorflow/tfjs-converter": "^4.22.0",
+    "@tensorflow/tfjs-core": "^4.22.0",
     "@tsparticles/engine": "^3.8.1",
     "@tsparticles/react": "^3.0.0",
     "@tsparticles/slim": "^3.8.1",

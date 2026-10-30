@@ -18,6 +18,7 @@ export function useWorkoutPersistence(userId?: string) {
     try {
       for (const item of readPending(localStorage, userId)) {
         await send(item.payload); removePending(localStorage, userId, item.clientSessionId);
+        window.dispatchEvent(new Event("fitcoach:session-saved"));
       }
     } catch (error) { setSaveError(error instanceof Error ? error.message : "Save failed"); }
     finally { busy.current = false; refresh(); }

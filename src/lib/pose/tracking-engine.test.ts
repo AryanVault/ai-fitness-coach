@@ -2,6 +2,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPoseTrackingEngine } from "./tracking-engine";
 describe("worker inference bridge",()=>{
  afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();});
+ it("falls back to balanced tracking after an alternative provider fails during inference",async()=>{
+  const paths:string[]=[];
+  class TestWorker {
+   onmessage:((event:{data:unknown})=>void)|null=null;onerror:unknown;terminate=vi.fn();path:string;
+   constructor(path:URL){this.path=String(path);paths.push(this.path);}
+   postMessage(message:{id:number;type:string}){queueMicrotask(()=>this.onmessage?.({data:{id:message.id,...(message.type==="frame"?this.path.includes("movenet")?{error:"Inference failed"}:{landmarks:[],latencyMs:10}:{})}}));}
+  }
+  vi.stubGlobal("Worker",TestWorker);vi.stubGlobal("window",{location:{origin:"https://test.example"}});
+  vi.stubGlobal("createImageBitmap",vi.fn(async()=>({close:vi.fn()})));
+  const engine=createPoseTrackingEngine({});await engine.setMode("alternative");
+  const frame={video:{} as HTMLVideoElement,timestampMs:1000,frameIndex:1,fps:30};
+  await expect(engine.processFrame(frame,"bicep_curl")).resolves.toBeNull();
+  await expect(engine.processFrame({...frame,timestampMs:1100},"bicep_curl")).resolves.toBeNull();
+  expect(paths.some(path=>path.includes("movenet"))).toBe(true);expect(paths.at(-1)).toContain("mediapipe");await engine.stop();
+ });
  it("allows cold WASM inference to warm up, then enforces the normal frame deadline",async()=>{
   vi.useFakeTimers();
   let current: TestWorker;

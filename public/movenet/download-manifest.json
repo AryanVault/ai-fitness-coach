@@ -1,0 +1,32 @@
+[
+  {
+    "path": "public/mediapipe/models/pose_landmarker_heavy.task",
+    "url": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task",
+    "bytes": 30664242,
+    "sha256": "64437af838a65d18e5ba7a0d39b465540069bc8aae8308de3e318aad31fcbc7b"
+  },
+  {
+    "path": "public/movenet/thunder/model.json",
+    "url": "https://tfhub.dev/google/tfjs-model/movenet/singlepose/thunder/4/model.json?tfjs-format=file",
+    "bytes": 168151,
+    "sha256": "957721af760b24a1abc93ce5d42caf0cb7795723ab873d3791f5f42f5cb8c7ca"
+  },
+  {
+    "path": "public/movenet/thunder/group1-shard1of3.bin",
+    "url": "https://tfhub.dev/google/tfjs-model/movenet/singlepose/thunder/4/group1-shard1of3.bin?tfjs-format=file",
+    "bytes": 4194304,
+    "sha256": "58dd47fd600a4849c342ce14e2ec32102744ca3d5f7fd9e6888d284f7f922cba"
+  },
+  {
+    "path": "public/movenet/thunder/group1-shard2of3.bin",
+    "url": "https://tfhub.dev/google/tfjs-model/movenet/singlepose/thunder/4/group1-shard2of3.bin?tfjs-format=file",
+    "bytes": 4194304,
+    "sha256": "08da980bc00886854f29b49b9c14528cd41626c0498c67b450de394713f1d0bc"
+  },
+  {
+    "path": "public/movenet/thunder/group1-shard3of3.bin",
+    "url": "https://tfhub.dev/google/tfjs-model/movenet/singlepose/thunder/4/group1-shard3of3.bin?tfjs-format=file",
+    "bytes": 4088504,
+    "sha256": "c1c6b712e33456aa95aa556b6425528d04fe8730ce9b92de38ec58e947fede34"
+  }
+]

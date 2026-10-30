@@ -238,7 +238,7 @@ export const workoutSessionInputSchema = z.object({
   modelEvidence: z.object({
     analysisVersion: z.literal("movement-engine-v3").optional(),
     scoreAvailability: z.record(z.enum(["form", "rom", "tempo", "stability", "symmetry", "consistency", "endurance", "safety", "overall"]), z.boolean()).optional(),
-    runtime: z.object({ provider: z.literal("mediapipe"), model: z.enum(["full", "lite"]).optional(), delegate: z.enum(["GPU", "CPU"]).optional(), inferenceP50Ms: z.number().nonnegative(), inferenceP95Ms: z.number().nonnegative(), sampleCount: z.number().int().nonnegative().max(600) }).optional(),
+    runtime: z.object({ provider: z.enum(["mediapipe", "movenet"]), model: z.enum(["full", "lite", "heavy", "thunder"]).optional(), delegate: z.enum(["GPU", "CPU", "WASM"]).optional(), inferenceP50Ms: z.number().nonnegative(), inferenceP95Ms: z.number().nonnegative(), sampleCount: z.number().int().nonnegative().max(600) }).optional(),
     artifactVersion: z.string().max(120), featureVersion: z.string().max(120),
     source: z.enum(["heuristic", "learned"]).optional(),
     calibratedConfidence: z.number().min(0).max(1).nullable().optional(),

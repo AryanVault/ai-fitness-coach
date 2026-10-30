@@ -58,7 +58,10 @@ Browser tests: install Chromium with `npx playwright install chromium`. Set `E2E
 
 ## Guides
 
+- [Body-registered camera and movement games](docs/tracking-games-validation-2026-10-29.md): model choices, curl bubbles, pushup levels, cardio reach, comparison benchmark and validation limits.
+
 - [Camera engine v3 validation](docs/camera-engine-validation-2026-10-29.md): tracking, observable fitness scoring, audio-clock dance timing, benchmark input and remaining physical-device evidence.
+- [Laptop and Android automated follow-up](docs/device-camera-validation-2026-10-29.md): camera lifecycle, interruption recovery, session preservation, touch/rotation and contrast regressions.
 - [Camera UI review](docs/camera-ui-review-2026-10-29.md): design-law checks and responsive camera fixes.
 
 - [Production deployment and operations](docs/production-beta-runbook.md)

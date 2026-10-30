@@ -13,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { createCameraController, getCameraProfile } from "@/lib/camera/controller";
 import { buildUnreliableCameraGuidance } from "@/lib/camera/guidance";
+import { clampPreviewPosition } from "@/lib/camera/floating-preview";
 import { createDanceMotionTracker } from "@/lib/dance/motion";
 import { createRoutineAudioTransport, type RoutineAudioState } from "@/lib/dance/audio-transport";
 import { createCalibrationTimer } from "@/lib/pose/calibration";
@@ -23,6 +24,11 @@ import { selectFeedbackCue } from "@/lib/feedback/cues";
 import { advanceFeedbackState, buildIssueSignature, createFeedbackState, type CoachLevel, type FeedbackCue } from "@/lib/feedback/state";
 import { createVoiceFeedbackController } from "@/lib/feedback/voice";
 import { useCameraRuntime } from "@/hooks/useCameraRuntime";
+import { useMovementGame } from "@/hooks/useMovementGame";
+import { MovementGames, MovementGameOverlay } from "@/components/coach/MovementGames";
+import { MOVEMENT_GAMES, type GameMode } from "@/lib/games/movement-game";
+import { TRACKING_MODES, type TrackingMode } from "@/lib/pose/providers";
+import { createRuntimeSamples } from "@/lib/pose/runtime-samples";
 import { usePostureModel } from "@/hooks/usePostureModel";
 import { useWorkoutPersistence } from "@/hooks/useWorkoutPersistence";
 import { SessionSaveStatus } from "@/components/coach/SessionSaveStatus";
@@ -407,26 +413,32 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const persistence = useWorkoutPersistence(profile?.userId);
   const curlMemoryKey = profile?.userId ? `${CURL_MEMORY_KEY}:${profile.userId}` : null;
   const clientSessionIdRef = useRef<string | null>(null);
+  const reportGenerationRef = useRef(0);
   const [cameraFacing, setCameraFacing] = useState<"user" | "environment">("user");
+  const [switchingCamera, setSwitchingCamera] = useState(false);
+  const cameraOperationRef = useRef(0);
   const exercises = useMemo(() => POSE_EXERCISES.filter((item) => IDS[mode].includes(item.id)), [mode]);
   const [exerciseId, setExerciseId] = useState<ExerciseId>(() => selectCoachExercise(mode, searchParams.get("exercise")));
   const exercise = useMemo(() => exercises.find((item) => item.id === exerciseId) ?? exercises[0], [exerciseId, exercises]);
 
+  const game = useMovementGame();
+  const [trackingMode,setTrackingMode] = useState<TrackingMode>("auto");
+  const [changingModel,setChangingModel] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
   const cameraRuntime = useCameraRuntime({
     videoRef, exerciseId: () => exerciseIdRef.current,
     onFrame: (frame, fps) => { setFps(Math.round(fps)); handleTrackingFrame(frame); },
     onBeforeLeave: () => { if (runningRef.current) void stopSession(); },
-    onDisconnect: () => { setCameraOn(false); handleTrackingFrame(null); },
-    onReset: () => { phaseTrackerRef.current = createPhaseTrackerState(); handleTrackingFrame(null); },
-    onError: error => { setCameraOn(false); toast.error(error.message); showStatus(error.message, "warning"); },
-    onTelemetry: event => pushTelemetry(event), onProfile: label => setCameraProfileLabel(label),
+    onDisconnect: () => handleCameraFailure(),
+    onReset: () => { game.invalidate(); phaseTrackerRef.current = createPhaseTrackerState(); handleTrackingFrame(null); },
+    onError: error => handleCameraFailure(error),
+    onTelemetry: event => { pushTelemetry(event); if(event.type === "model_quality_downgrade") toast.message(event.message); }, onProfile: label => setCameraProfileLabel(label),
   });
   const { controllerRef: cameraControllerRef, engineRef: trackingEngineRef } = cameraRuntime;
   const trackingFrameRef = useRef<TrackingFrame | null>(null);
-  const inferenceSamplesRef = useRef<number[]>([]);
-  const [trackingRuntime, setTrackingRuntime] = useState<{ inferenceMs?: number; ageMs?: number; captureFps?: number; model?: string; delegate?: string }>({});
+  const inferenceSamplesRef = useRef(createRuntimeSamples());
+  const [trackingRuntime, setTrackingRuntime] = useState<{ inferenceMs?: number; ageMs?: number; captureFps?: number; model?: string; delegate?: string; provider?: string; rejected?:number }>({});
   const runningRef = useRef(false);
   const mirrorRef = useRef(true);
   const exerciseIdRef = useRef<ExerciseId>(exerciseId);
@@ -556,30 +568,22 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   }, []);
 
   const runDrawLoop = (landmarks: Landmark[] | null, score: number, exerciseId: ExerciseId, analysis?: FrameAnalysis) => {
-    if (hudMode === "3d") {
-      if (threeCanvasRef.current) {
-        if (overlayRef.current) {
-          threeCanvasRef.current.width = overlayRef.current.width;
-          threeCanvasRef.current.height = overlayRef.current.height;
-        }
-        if (!threeStateRef.current) {
-          try { threeStateRef.current = initThreeHUD(threeCanvasRef.current); }
-          catch { setHudMode("2d"); toast.message("Depth view is unavailable. Using the 2D overlay."); return; }
-        }
-        const targetW = overlayRef.current?.width || 640;
-        const targetH = overlayRef.current?.height || 360;
-        const state = threeStateRef.current;
-        if (state.renderer.domElement.width !== targetW || state.renderer.domElement.height !== targetH) {
-          state.camera.aspect = targetW / targetH;
-          state.camera.updateProjectionMatrix();
-          state.renderer.setSize(targetW, targetH, false);
-        }
-        updateThreeHUD(state, landmarks, score, streakCount, mirrorRef.current, exerciseId, analysis);
-      }
-      draw(overlayRef.current, videoRef.current, landmarks, score, mirrorRef.current, exerciseId, analysis, true);
-    } else {
-      draw(overlayRef.current, videoRef.current, landmarks, score, mirrorRef.current, exerciseId, analysis, false);
+    // Size from the image before updating the depth canvas. Both canvases letterbox
+    // identically to the video, including portrait and mirrored previews.
+    draw(overlayRef.current, videoRef.current, landmarks, score, mirrorRef.current, exerciseId, analysis, hudMode === "3d");
+    if (hudMode !== "3d" || !threeCanvasRef.current) return;
+    if (!threeStateRef.current) {
+      try { threeStateRef.current = initThreeHUD(threeCanvasRef.current); }
+      catch { setHudMode("2d"); toast.message("Depth view is unavailable. Using the 2D overlay."); return; }
     }
+    const targetW = overlayRef.current?.width || 640;
+    const targetH = overlayRef.current?.height || 360;
+    const state = threeStateRef.current;
+    state.camera.left = -targetW / targetH;
+    state.camera.right = targetW / targetH;
+    state.camera.updateProjectionMatrix();
+    if (state.renderer.domElement.width !== targetW || state.renderer.domElement.height !== targetH) state.renderer.setSize(targetW, targetH, false);
+    updateThreeHUD(state, landmarks, score, streakCount, mirrorRef.current, exerciseId, analysis);
   };
 
   const pushTelemetry = (event: SessionTelemetryEvent) => {
@@ -623,11 +627,12 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   };
 
   const reset = () => {
+    reportGenerationRef.current++;
     routineAudioRef.current?.stop();
     danceMotionRef.current.reset();
     calibrationTimerRef.current.reset();
     lastDanceEventRef.current = null;
-    inferenceSamplesRef.current = [];
+    inferenceSamplesRef.current.reset();
     phaseTrackerRef.current = createPhaseTrackerState();
     feedbackStateRef.current = createFeedbackState();
     lastRepAtRef.current = 0;
@@ -688,7 +693,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     const drag = pipDragRef.current;
     if (!drag) return;
     const box = event.currentTarget.getBoundingClientRect();
-    setPipPos({ x: Math.max(0, Math.min(window.innerWidth - box.width, drag.px - (event.clientX - drag.sx))), y: Math.max(0, Math.min(window.innerHeight - box.height, drag.py - (event.clientY - drag.sy))) });
+    setPipPos(clampPreviewPosition({x:drag.px-(event.clientX-drag.sx),y:drag.py-(event.clientY-drag.sy)}, {width:window.innerWidth,height:window.innerHeight}, box));
   };
 
   const onPipPointerUp = () => {
@@ -894,10 +899,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   };
 
   const handleTrackingFrame = (trackingFrame: TrackingFrame | null) => {
+    game.processFrame(trackingFrame);
     const currentId = exerciseIdRef.current;
     const currentExercise = exerciseRef.current;
     const learned = trackingFrame ? postureModel.predict({ timestampMs: trackingFrame.timestampMs, landmarks: trackingFrame.analysisLandmarks ?? trackingFrame.smoothedLandmarks }) : null;
-    runDrawLoop(trackingFrame?.smoothedLandmarks ?? null, analysisRef.current.overall, currentId, analysisRef.current);
+    runDrawLoop(trackingFrame?.displayLandmarks ?? trackingFrame?.smoothedLandmarks ?? null, analysisRef.current.overall, currentId, analysisRef.current);
 
     if (!trackingFrame?.smoothedLandmarks?.length) {
       trackingFrameRef.current = null;
@@ -943,8 +949,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       calibrationTimerRef.current.reset();
     }
     trackingFrameRef.current = trackingFrame;
-    if (Number.isFinite(trackingFrame.inferenceLatencyMs)) inferenceSamplesRef.current = [...inferenceSamplesRef.current.slice(-599), trackingFrame.inferenceLatencyMs!];
-    setTrackingRuntime({ inferenceMs: trackingFrame.inferenceLatencyMs, ageMs: trackingFrame.frameAgeMs, captureFps: trackingFrame.captureFps, model: trackingFrame.modelQuality, delegate: trackingFrame.delegate });
+    inferenceSamplesRef.current.add(trackingFrame);
+    setTrackingRuntime({ inferenceMs: trackingFrame.inferenceLatencyMs, ageMs: trackingFrame.frameAgeMs, captureFps: trackingFrame.captureFps, model: trackingFrame.modelQuality, delegate: trackingFrame.delegate, provider:trackingFrame.provider, rejected:trackingFrame.rejectedJoints?.length ?? 0 });
     setFps(Math.round(trackingFrame.fps));
     const gate = evaluateConfidence(trackingFrame, currentId);
     setConfidence(gate);
@@ -973,7 +979,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       }
       showStatus(gate.message);
       setTrackingPausedReason(null);
-      runDrawLoop(trackingFrame.smoothedLandmarks, 80, currentId);
+      runDrawLoop(trackingFrame.displayLandmarks ?? trackingFrame.smoothedLandmarks, 80, currentId);
       return;
     }
 
@@ -1117,7 +1123,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     const estimatedCalories = Math.round((elapsedSeconds / 60) * (currentExercise.category === "dance" || currentExercise.id === "jumping_jack" ? 8.5 : 6.5));
     setCalories(estimatedCalories);
     caloriesRef.current = estimatedCalories;
-    runDrawLoop(trackingFrame.smoothedLandmarks, resolved.overall, currentId, resolved);
+    runDrawLoop(trackingFrame.displayLandmarks ?? trackingFrame.smoothedLandmarks, resolved.overall, currentId, resolved);
 
     let liveCue = selectFeedbackCue(currentId, resolved, safety, trackingFrame.trackingConfidence, { coachLevel: coachLevelRef.current });
     if (learned?.evaluationStatus === "validated" && !learned.suppressed && learned.observedFaults?.length && liveCue.severity !== "critical") {
@@ -1145,29 +1151,50 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     lastOverallRef.current = resolved.overall;
   };
 
+  const handleCameraFailure = (error?: Error) => {
+    game.invalidate();
+    cameraOperationRef.current++;
+    cameraRuntime.stop();
+    routineAudioRef.current?.stop();
+    danceMotionRef.current.reset();
+    calibrationTimerRef.current.reset();
+    if (runningRef.current) void stopSession();
+    setCameraOn(false); setLoading(false); setSwitchingCamera(false);
+    handleTrackingFrame(null);
+    if (error) { toast.error(error.message); showStatus(error.message, "warning"); }
+  };
+
   const startCamera = async () => {
-    if (cameraOn) return;
+    if (cameraOn || loading || savingRef.current) return;
+    const operation = ++cameraOperationRef.current;
     setLoading(true);
     try {
       const video = videoRef.current;
       if (!video) return;
       const cameraInfo = await cameraRuntime.start();
+      if (operation !== cameraOperationRef.current) return;
       setCameraProfileLabel(cameraInfo.profile.label);
+      setCameraFacing(cameraInfo.profile.facingMode);
+      setMirror(cameraInfo.profile.mirroredPreview);
       setCameraOn(true);
       showStatus(
         `${cameraInfo.profile.label} active. Finish calibration before starting the session.`,
       );
     } catch (error) {
+      if (operation !== cameraOperationRef.current || (error instanceof Error && /cancelled/i.test(error.message))) return;
       const message = error instanceof Error ? error.message : "Failed to access camera";
       pushTelemetry({ timestampMs: 0, type: "camera_start_failure", message });
       showStatus(message, "warning", "system", "If you already allowed access, another app may still be using the camera.");
       toast.error(message);
     } finally {
-      setLoading(false);
+      if (operation === cameraOperationRef.current) setLoading(false);
     }
   };
 
   const stopCamera = (options: { preserveResults?: boolean } = {}) => {
+    cameraOperationRef.current++;
+    setLoading(false);
+    setSwitchingCamera(false);
     try {
       cameraRuntime.stop();
       routineAudioRef.current?.stop();
@@ -1203,6 +1230,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   };
 
   const startSession = () => {
+    if(game.mode){toast.message("Exit the movement game before starting a workout session.");return;}
     if (profileLoading || profileError || !profile?.userId) { toast.error("Wait for your saved profile to load before starting."); return; }
     if (!cameraOn) return;
     const isFastStart = isFastStartExercise(exerciseIdRef.current);
@@ -1244,14 +1272,14 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
 
   const stopSession = async () => {
     if (savingRef.current) return;
+    const generation = reportGenerationRef.current;
     savingRef.current = true;
     routineAudioRef.current?.stop();
     danceMotionRef.current.reset();
     runningRef.current = false;
     setRunning(false);
     try {
-      const samples = [...inferenceSamplesRef.current].sort((a,b) => a-b);
-      const runtime = samples.length ? { provider: "mediapipe" as const, model: trackingFrameRef.current?.modelQuality, delegate: trackingFrameRef.current?.delegate, inferenceP50Ms: samples[Math.floor((samples.length-1)*.5)], inferenceP95Ms: samples[Math.floor((samples.length-1)*.95)], sampleCount: samples.length } : undefined;
+      const runtime = inferenceSamplesRef.current.report();
       const pick = (key: ScoreKey) => Math.round(average(framesRef.current.filter(frame => frame.scoreAvailability?.[key] !== false).map(frame => frame[key])));
       const scoring = { form: pick("form"), rom: pick("rom"), tempo: pick("tempo"), stability: pick("stability"), symmetry: pick("symmetry"), consistency: pick("consistency"), endurance: pick("endurance"), safety: pick("safety") };
       const sessionAnalysis = finalizeSessionAnalysis(sessionBufferRef.current);
@@ -1286,6 +1314,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
           sessionAnalysis,
       });
       window.dispatchEvent(new Event("fitcoach:session-saved"));
+      if (generation !== reportGenerationRef.current) return;
       if (data?.coachAgent) {
         setPostSessionAgent(data.coachAgent);
         setAgentReport(data.coachAgent);
@@ -1322,6 +1351,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         }),
       });
       const summaryData = await parseApiResponse(summaryRes);
+      if (generation !== reportGenerationRef.current) return;
       if (summaryRes.ok) {
         setSummary(summaryData.summary || "");
         setSummaryInsights(Array.isArray(summaryData.keyInsights) ? summaryData.keyInsights : []);
@@ -1336,10 +1366,12 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       }
       showStatus("Session saved. Review the summary before restarting.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save session");
+      if (generation === reportGenerationRef.current) toast.error(error instanceof Error ? error.message : "Failed to save session");
     } finally {
-      savingRef.current = false;
-      stopCamera({ preserveResults: true });
+      if (generation === reportGenerationRef.current) {
+        savingRef.current = false;
+        stopCamera({ preserveResults: true });
+      }
     }
   };
 
@@ -1561,7 +1593,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     };
   }, [mode]);
 
-  useEffect(() => () => { stopCamera(); voiceRef.current.stop(); }, []);
+  useEffect(() => () => { reportGenerationRef.current++; stopCamera(); voiceRef.current.stop(); }, []);
   useEffect(() => () => {
     disposeThreeHUD(threeStateRef.current); threeStateRef.current = null;
     disposeThreeHUD(replayThreeStateRef.current); replayThreeStateRef.current = null;
@@ -1642,7 +1674,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         const targetH = replayOverlayRef.current.height || 360;
         const state = replayThreeStateRef.current;
         if (state.renderer.domElement.width !== targetW || state.renderer.domElement.height !== targetH) {
-          state.camera.aspect = targetW / targetH;
+          state.camera.left = -targetW / targetH;
+          state.camera.right = targetW / targetH;
           state.camera.updateProjectionMatrix();
           state.renderer.setSize(targetW, targetH, false);
         }
@@ -1774,17 +1807,38 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     [cameraOn, cameraProfileLabel, confidence.avgVisibility, confidence.brightness, confidence.centered, confidence.tooClose, confidence.tooFar, curlBaseline],
   );
 
-  useEffect(() => { cameraControllerRef.current?.setPreviewVisible(cameraViewMode !== "minimized"); }, [cameraViewMode]);
+  useEffect(() => { cameraRuntime.setPreviewVisible(cameraViewMode !== "minimized"); }, [cameraViewMode]);
+  useEffect(() => {
+    if (cameraViewMode !== "pip") return;
+    const fit = () => {
+      const box = videoRef.current?.closest('[data-testid="camera-preview"]')?.getBoundingClientRect();
+      if (!box) return;
+      setPipPos(previous => {
+        const next = clampPreviewPosition(previous,{width:window.innerWidth,height:window.innerHeight},box);
+        return next.x === previous.x && next.y === previous.y ? previous : next;
+      });
+    };
+    fit(); window.addEventListener("resize",fit); window.addEventListener("orientationchange",fit);
+    return () => { window.removeEventListener("resize",fit); window.removeEventListener("orientationchange",fit); };
+  }, [cameraViewMode]);
   const cameraImageAspect = (videoRef.current?.videoWidth || 16) / (videoRef.current?.videoHeight || 9);
   const cameraBoxAspect = cameraLayout === "portrait" ? 3/4 : 16/9;
   const cameraGuideStyle = cameraImageAspect >= cameraBoxAspect ? { width: "100%", aspectRatio: cameraImageAspect } : { height: "100%", aspectRatio: cameraImageAspect };
   const cameraViewport = (
     <>
     <SessionSaveStatus count={persistence.pendingCount} error={persistence.saveError} retry={persistence.retry} />
-    <Button className="my-2" variant="outline" disabled={!cameraOn} onClick={() => {
+    <Button className="my-2" variant="outline" disabled={!cameraOn || switchingCamera || loading} onClick={async () => {
       const next = cameraFacing === "user" ? "environment" : "user";
-      void cameraControllerRef.current?.setFacingMode(next).then(() => { setCameraFacing(next); setMirror(next === "user"); }).catch(() => toast.error("Camera could not be switched"));
-    }}>Switch to {cameraFacing === "user" ? "rear" : "front"} camera</Button>
+      const operation = ++cameraOperationRef.current;
+      setSwitchingCamera(true);
+      try {
+        const result = await cameraControllerRef.current?.setFacingMode(next);
+        if (!result || operation !== cameraOperationRef.current) return;
+        setCameraFacing(result.profile.facingMode); setMirror(result.profile.mirroredPreview); setCameraProfileLabel(result.profile.label);
+      } catch (error) {
+        if (operation === cameraOperationRef.current && !(error instanceof Error && /cancelled/i.test(error.message))) handleCameraFailure(error instanceof Error ? error : new Error("Camera could not be switched"));
+      } finally { if (operation === cameraOperationRef.current) setSwitchingCamera(false); }
+    }}>{switchingCamera ? "Switching camera..." : `Switch to ${cameraFacing === "user" ? "rear" : "front"} camera`}</Button>
 
     <div className="min-w-0 rounded-xl bg-secondary">
       <div className={cn("relative isolate overflow-hidden rounded-xl bg-black", cameraLayout === "portrait" ? "aspect-[3/4]" : "aspect-video")}>
@@ -1797,9 +1851,10 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       />
       <canvas ref={overlayRef} data-testid="pose-overlay" className="pointer-events-none absolute inset-0 h-full w-full object-contain z-20" />
       {hudMode === "3d" && (
-        <canvas ref={threeCanvasRef} className="pointer-events-none absolute inset-0 h-full w-full z-10" />
+        <canvas ref={threeCanvasRef} data-testid="depth-overlay" className="pointer-events-none absolute inset-0 h-full w-full object-contain z-10" />
       )}
-      {exerciseId === "bicep_curl" && curlReferenceOverlay ? (
+      <MovementGameOverlay snapshot={game.playing ? game.snapshot : null} aspectRatio={cameraImageAspect} mirror={mirror} />
+      {exerciseId === "bicep_curl" && curlReferenceOverlay && !game.mode ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center"><div className="relative" style={cameraGuideStyle}>
           <div className="absolute left-[18%] top-[28%] h-[42%] w-[22%] rounded-full border border-border" />
           <div className="absolute right-[18%] top-[28%] h-[42%] w-[22%] rounded-full border border-border" />
@@ -1818,6 +1873,12 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         <span>{fps} analysis fps</span>
         <span>Score {running || framesRef.current.length ? analysis.overall : "unavailable"}</span>
       </div>
+
+      {game.playing && game.snapshot && <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 pt-4" aria-label="Live game guidance">
+        <p className="min-w-0 flex-1 text-sm leading-6">{game.snapshot.message}</p>
+        <span className="text-sm font-semibold tabular-nums">{game.snapshot.points} points</span>
+        <Button variant="ghost" size="sm" onClick={game.pause}>Rest</Button>
+      </div>}
 
       <div className="flex flex-wrap items-center gap-2 px-4 pt-3" role="group" aria-label="Pose overlay mode">
         <button
@@ -1853,16 +1914,23 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         </div>
       ) : null}
 
-      {!running ? (
+      {mode === "workout" && <div className="px-4 pb-4"><MovementGames game={game} cameraOn={cameraOn} workoutRunning={running} onStart={()=>videoRef.current?.scrollIntoView({block:"center",behavior:"instant"})} onSelect={(next:GameMode|null)=>{
+        if(running)return;
+        game.select(next);
+        const activity=MOVEMENT_GAMES.find(item=>item.id===next);
+        if(activity){exerciseIdRef.current=activity.exercise;setExerciseId(activity.exercise);}
+      }}/></div>}
+
+      {!running && (!game.mode || !cameraOn) ? (
         <div className="p-4">
           <SessionSetupCard
             cameraOn={cameraOn}
             loading={loading}
-            ready={calibrationReady}
+            ready={!game.mode && calibrationReady && !profileLoading && !profileError && !!profile?.userId}
             title={`${exercise.label} setup`}
             description={exerciseDescription}
             calibration={exercise.calibration}
-            confidenceMessage={calibrationMessage}
+            confidenceMessage={profileError ? "Your saved profile could not load. Reload this page before starting a session." : profileLoading ? "Loading your saved profile before starting a session." : calibrationMessage}
             whyThisSession={preSessionWhy}
             focusMetric={sessionFocusMetric}
             cameraState={{
@@ -1877,8 +1945,9 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         </div>
       ) : null}
 
-      {running ? (
+      {cameraOn ? (
         <div className="flex flex-wrap items-center gap-2 p-4 text-sm text-foreground">
+          {running && <>
           <div className="flex items-center gap-2 px-1 py-1.5">
             <Timer className="h-4 w-4 text-primary" />
             <span>{seconds}s</span>
@@ -1899,6 +1968,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
             <CheckCircle2 className="h-4 w-4 text-primary" />
             <span>{qualityPercent}% visible</span>
           </div>
+          </>}
           <div className="ml-auto flex flex-wrap gap-2">
             <Button size="sm" variant="outline" className="border-border bg-card text-foreground" onClick={() => setMirror((value) => !value)}>
               {mirror ? <Monitor className="h-4 w-4" /> : <RotateCcw className="h-4 w-4" />}
@@ -1921,9 +1991,9 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
               {cameraViewMode === "pip" ? <Maximize2 className="h-4 w-4" /> : <Minimize2 className="h-4 w-4" />}
               PiP
             </Button>
-            <Button size="sm" className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => void stopSession()}>
+            {running ? <Button size="sm" className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => void stopSession()}>
               Stop session
-            </Button>
+            </Button> : <Button size="sm" variant="ghost" onClick={()=>{game.invalidate();stopCamera();}}>Stop camera</Button>}
           </div>
         </div>
       ) : null}
@@ -1953,8 +2023,10 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                         className={cn(item.id === exerciseId ? "bg-primary text-primary-foreground" : "border-border bg-background text-foreground")}
                         onClick={() => {
                           if (item.id === exerciseId) return;
+                          if (runningRef.current) void stopSession();
                           stopCamera();
                           reset();
+                          game.select(null);
                           setExerciseId(item.id);
                         }}
                       >
@@ -2015,7 +2087,13 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         >
           <div className={cn(cameraViewMode === "pip" && "overflow-y-auto rounded-xl bg-background shadow-sm")} style={cameraViewMode === "pip" ? { maxHeight: `calc(100dvh - ${pipPos.y + 16}px)` } : undefined}>
             <div className={cn("items-center justify-between border-b border-border px-4 py-3 text-sm text-foreground", cameraViewMode === "pip" ? "flex" : "hidden")}>
-              <button type="button" className="flex items-center gap-2" onPointerDown={onPipPointerDown}>
+              <button type="button" className="flex touch-none select-none items-center gap-2" title="Drag to move, or use arrow keys" onPointerDown={onPipPointerDown} onKeyDown={event => {
+                const delta = {ArrowLeft:[16,0],ArrowRight:[-16,0],ArrowUp:[0,16],ArrowDown:[0,-16]}[event.key];
+                if (!delta) return;
+                event.preventDefault();
+                const box = event.currentTarget.closest('[data-testid="camera-preview"]')!.getBoundingClientRect();
+                setPipPos(previous => clampPreviewPosition({x:previous.x+delta[0],y:previous.y+delta[1]}, {width:window.innerWidth,height:window.innerHeight}, box));
+              }}>
                 <GripVertical className="h-4 w-4 text-muted-foreground" />
                 Camera monitor
               </button>
@@ -2167,6 +2245,17 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                     <div className="rounded-xl border border-border bg-card/60 px-3 py-2">Brightness: <span className="font-medium text-foreground">{Math.round(confidence.brightness)}</span></div>
                     <div className="rounded-xl border border-border bg-card/60 px-3 py-2">Motion: <span className="font-medium text-foreground">{confidence.motion.toFixed(1)}</span></div>
                   </div>
+                  <label className="block text-sm font-medium">Tracking model
+                    <select aria-label="Tracking model" value={trackingMode} disabled={running || game.playing || changingModel} onChange={async event=>{
+                      const next=event.target.value as TrackingMode;
+                      setChangingModel(true);
+                      try { await cameraRuntime.setMode(next);setTrackingMode(next); }
+                      finally {setChangingModel(false);}
+                    }} className="mt-2 block w-full rounded-md bg-secondary px-3 py-3 text-foreground disabled:opacity-50">
+                      {TRACKING_MODES.map(model=><option key={model.id} value={model.id}>{model.label}</option>)}
+                    </select>
+                  </label>
+                  <p className="text-xs leading-5 text-muted-foreground">{TRACKING_MODES.find(model=>model.id===trackingMode)?.detail} Pause a game or finish a session to change models. A model change resets calibration.</p>
                   <p className="text-xs leading-5 text-muted-foreground" aria-label="Measured tracking performance">
                     Analysis: {fps} fps. Camera setting: {trackingRuntime.captureFps != null ? `${Math.round(trackingRuntime.captureFps)} fps` : "unavailable"}.
                     {trackingRuntime.inferenceMs != null ? ` Inference: ${Math.round(trackingRuntime.inferenceMs)} ms. Frame age: ${Math.round(trackingRuntime.ageMs ?? 0)} ms.` : ""}
@@ -2204,7 +2293,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
               <CardContent className="space-y-4">
                 {exerciseId === "squat" || exerciseId === "bicep_curl" ? (
                   <div className="rounded-2xl border border-border bg-primary/10 p-4">
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="flex min-w-0 flex-col gap-3">
                       <div>
                         <div className="flex items-center gap-2">
                           <Brain className="h-4 w-4 text-primary" />
@@ -2218,14 +2307,14 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                             : "Start the camera to collect visible movement measurements."}
                         </p>
                       </div>
-                      <div className="grid min-w-40 grid-cols-2 gap-2 text-center">
+                      <div className="grid min-w-0 grid-cols-2 gap-2 text-center">
                         <div className="rounded-xl border border-border bg-background/50 p-3">
                           <p className="text-xs text-muted-foreground">Quality</p>
                           <p className={cn("mt-1 text-xl font-semibold", text(mlPrediction?.predictedQuality ?? 0))}>{mlPrediction?.predictedQuality ?? "--"}</p>
                         </div>
                         <div className="rounded-xl border border-border bg-background/50 p-3">
                           <p className="text-xs text-muted-foreground">Confidence</p>
-                          <p className="mt-1 text-xl font-semibold text-primary">{mlPrediction?.calibratedConfidence != null ? `${Math.round(mlPrediction.calibratedConfidence * 100)}%` : "Uncalibrated"}</p>
+                          <p className={cn("mt-1 break-words font-semibold text-primary",mlPrediction?.calibratedConfidence != null ? "text-xl" : "text-sm")}>{mlPrediction?.calibratedConfidence != null ? `${Math.round(mlPrediction.calibratedConfidence * 100)}%` : "Uncalibrated"}</p>
                         </div>
                       </div>
                     </div>

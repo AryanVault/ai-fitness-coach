@@ -4,6 +4,7 @@ const eslintConfig = [
   {
     ignores: [
       '.next/**',
+      '.next-games/**',
       'node_modules/**',
       'test-results/**',
       'playwright-report/**',
@@ -12,6 +13,8 @@ const eslintConfig = [
       'datasets/**',
       'public/mediapipe/wasm/**',
       'public/mediapipe/pose-worker.js',
+      'public/movenet/movenet-worker.js',
+      'public/movenet/wasm/**',
     ],
   },
   ...nextVitals,

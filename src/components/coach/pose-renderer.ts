@@ -1,10 +1,11 @@
 import * as THREE from "three";
 import { POSE_CONNECTIONS } from "@/lib/pose/exercises";
-import { angle, distance } from "@/lib/pose/math";
+import { angle } from "@/lib/pose/math";
+import { landmarkToScene } from "@/lib/pose/projection";
 import type { Landmark, ExerciseId, FrameAnalysis } from "@/lib/pose/types";
 export interface ThreeHUDState {
   scene: THREE.Scene;
-  camera: THREE.PerspectiveCamera;
+  camera: THREE.OrthographicCamera;
   renderer: THREE.WebGLRenderer;
   jointMeshes: Map<number, THREE.Mesh>;
   lineSegments: THREE.LineSegments;
@@ -36,9 +37,9 @@ export function initThreeHUD(canvas: HTMLCanvasElement): ThreeHUDState {
 
   const scene = new THREE.Scene();
 
-  const camera = new THREE.PerspectiveCamera(40, aspect, 0.1, 100);
-  camera.position.set(0, 0.2, 7.8);
-  camera.lookAt(0, 0.2, -0.5);
+  const camera = new THREE.OrthographicCamera(-aspect, aspect, 1, -1, .1, 20);
+  camera.position.set(0, 0, 5);
+  camera.lookAt(0, 0, 0);
 
   const renderer = new THREE.WebGLRenderer({
     canvas,
@@ -47,7 +48,8 @@ export function initThreeHUD(canvas: HTMLCanvasElement): ThreeHUDState {
     powerPreference: "high-performance",
   });
   renderer.setSize(width, height, false);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  // Intrinsic pixels match the video; CSS applies the same object-contain transform.
+  renderer.setPixelRatio(1);
 
   const gridHelper = new THREE.GridHelper(14, 28, 0x06b6d4, 0x1e293b);
   gridHelper.position.y = -2.4;
@@ -73,7 +75,7 @@ export function initThreeHUD(canvas: HTMLCanvasElement): ThreeHUDState {
   const jointMeshes = new Map<number, THREE.Mesh>();
   const jointsToRender = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
 
-  const sphereGeo = new THREE.SphereGeometry(0.12, 16, 16);
+  const sphereGeo = new THREE.SphereGeometry(0.012, 12, 12);
 
   jointsToRender.forEach((idx) => {
     const mat = new THREE.MeshBasicMaterial({
@@ -124,7 +126,8 @@ export function updateThreeHUD(
   exerciseId: ExerciseId,
   analysis?: FrameAnalysis
 ) {
-  if (!threeState?.initialized || !landmarks?.length) return;
+  if (!threeState?.initialized) return;
+  landmarks ??= [];
 
   const { scene, camera, renderer, jointMeshes, lineSegments, gridHelper, cage, sparkGroups } = threeState;
 
@@ -139,18 +142,14 @@ export function updateThreeHUD(
     (cage.material as THREE.LineBasicMaterial).color.setHex(activeColor);
   }
 
-  const scaleX = 7.2;
-  const scaleY = 7.2;
-  const scaleZ = 5.0;
+  const aspect = (camera.right - camera.left) / 2;
 
   jointMeshes.forEach((mesh, idx) => {
     const pt = landmarks[idx];
     if (pt && (pt.visibility ?? 0) > 0.4) {
       mesh.visible = true;
-      const adjustedX = mirror ? (1.5 - pt.x - 1.0) : (pt.x - 0.5);
-      mesh.position.x = adjustedX * scaleX;
-      mesh.position.y = (0.5 - pt.y) * scaleY;
-      mesh.position.z = -(pt.z ?? 0) * scaleZ;
+      const position = landmarkToScene(pt, aspect, mirror);
+      mesh.position.set(position.x, position.y, position.z);
 
       (mesh.material as THREE.MeshBasicMaterial).color.setHex(activeColor);
     } else {

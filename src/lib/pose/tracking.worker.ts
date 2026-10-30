@@ -1,7 +1,7 @@
 import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
 import type { Landmark } from "@/lib/pose/types";
-export type PoseWorkerRequest = { id: number; type: "init" | "frame" | "stop"; quality?: "full" | "lite"; origin?: string; bitmap?: ImageBitmap; timestampMs?: number };
-export type PoseWorkerReply = { id: number; error?: string; landmarks?: Landmark[]; worldLandmarks?: Landmark[]; brightness?: number; latencyMs?: number; delegate?: "GPU" | "CPU"; poseCount?: number };
+export type PoseWorkerRequest = { id: number; type: "init" | "frame" | "stop"; quality?: import("./providers").ModelQuality; origin?: string; bitmap?: ImageBitmap; timestampMs?: number };
+export type PoseWorkerReply = { id: number; error?: string; landmarks?: Landmark[]; worldLandmarks?: Landmark[]; brightness?: number; latencyMs?: number; delegate?: "GPU" | "CPU" | "WASM"; provider?: import("./providers").PoseProvider; poseCount?: number };
 let landmarker: PoseLandmarker | null = null;
 let busy = false;
 let brightness = 80;

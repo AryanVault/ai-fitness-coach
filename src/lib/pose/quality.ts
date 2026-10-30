@@ -86,7 +86,12 @@ type QualityInput = {
 };
 
 export function evaluateFrameQuality(input: QualityInput): ConfidenceStatus {
-  const requiredPoints = REQUIRED_BY_EXERCISE[input.exerciseId];
+  let requiredPoints = REQUIRED_BY_EXERCISE[input.exerciseId];
+  if(input.exerciseId === "pushup" || input.exerciseId === "plank") {
+    const left=[11,13,15,23,25,27],right=[12,14,16,24,26,28];
+    const score=(indices:number[])=>Math.min(...indices.map(i=>visibility(input.landmarks[i]))) + average(indices.map(i=>visibility(input.landmarks[i])));
+    requiredPoints=score(right)>score(left)?right:left;
+  }
   const visibilities = requiredPoints.map((index) => visibility(input.landmarks[index]));
   const avgVisibility = average(visibilities);
   const fullBodyVisible = visibilities.every((item) => item > 0.45);

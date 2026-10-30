@@ -65,6 +65,8 @@ export function createCameraController(options: CameraControllerOptions) {
   let animationHandle: number | null = null;
   let frameIndex = 0;
   let epoch = 0;
+  let startGeneration = 0;
+  let requestGeneration = 0;
   let slowFrames = 0;
   let facingMode: "user" | "environment" = "user";
   let lastTimestampMs = 0;
@@ -136,22 +138,23 @@ export function createCameraController(options: CameraControllerOptions) {
   };
 
   const stopTracks = () => {
-    stream?.getTracks().forEach((track) => track.stop());
+    const retired = stream;
     stream = null;
     video.srcObject = null;
+    retired?.getTracks().forEach((track) => track.stop());
   };
 
-  const buildConstraints = () => ({
+  const buildConstraints = (requestedProfile: CameraProfile, requestedFacing: "user" | "environment") => ({
     audio: false,
     video: {
-      facingMode: { ideal: facingMode },
-      width: { ideal: profile.width },
-      height: { ideal: profile.height },
-      frameRate: { ideal: profile.frameRate, max: profile.frameRate },
+      facingMode: requestedFacing === "environment" ? { exact: requestedFacing } : { ideal: requestedFacing },
+      width: { ideal: requestedProfile.width },
+      height: { ideal: requestedProfile.height },
+      frameRate: { ideal: requestedProfile.frameRate, max: requestedProfile.frameRate },
     },
   });
 
-  const normalizeCameraError = (error: unknown) => {
+  const normalizeCameraError = (error: unknown, requestedFacing: "user" | "environment") => {
     const err = error as { name?: string; message?: string };
     switch (err?.name) {
       case "NotAllowedError":
@@ -159,13 +162,13 @@ export function createCameraController(options: CameraControllerOptions) {
         return new Error("Camera permission was blocked. Allow camera access in your browser and system settings, then try again.");
       case "NotFoundError":
       case "DevicesNotFoundError":
-        return new Error("No camera was found on this device.");
+        return new Error(requestedFacing === "environment" ? "No rear camera was found on this device. Choose the front camera." : "No camera was found on this device.");
       case "NotReadableError":
       case "TrackStartError":
         return new Error("Your camera is busy in another app. Close Zoom, Meet, Photo Booth, or other camera apps and try again.");
       case "OverconstrainedError":
       case "ConstraintNotSatisfiedError":
-        return new Error("This camera does not support the requested quality settings.");
+        return new Error(requestedFacing === "environment" ? "The rear camera could not be opened at a supported quality. Choose the front camera or use a device with a rear camera." : "This camera does not support the requested quality settings.");
       case "SecurityError":
         return new Error("Camera access is blocked by browser security settings. Open the app over HTTPS or localhost and allow camera permissions.");
       default:
@@ -177,15 +180,23 @@ export function createCameraController(options: CameraControllerOptions) {
     epoch++; stopScheduling(); lastTimestampMs = 0; options.onReset?.();
     if (!document.hidden) scheduleFrame();
   };
-  const handleOrientation = () => { lastTimestampMs = 0; options.onReset?.(); };
+  const handleOrientation = () => {
+    epoch++; stopScheduling(); lastTimestampMs = 0; lastMediaTime = -1; options.onReset?.(); scheduleFrame();
+  };
+  const effectiveProfile = (): CameraProfile => ({ ...profile, facingMode, mirroredPreview: facingMode === "user" });
   return {
     async start(nextPreset?: CameraPreset) {
       if (nextPreset) {
         profile = CAMERA_PROFILES[nextPreset];
       }
 
-      const startEpoch = ++epoch;
+      const startEpoch = ++startGeneration;
+      requestGeneration++;
+      const requestedFacing = facingMode;
+      epoch++;
       running = false;
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("orientationchange", handleOrientation);
       stopScheduling();
       stopTracks();
       if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
@@ -198,18 +209,23 @@ export function createCameraController(options: CameraControllerOptions) {
 
       let lastError: unknown = null;
       let acquired: MediaStream | null = null;
+      let acquiredProfile = profile;
       for (const presetName of Array.from(new Set(presetsToTry))) {
-        profile = CAMERA_PROFILES[presetName];
+        acquiredProfile = CAMERA_PROFILES[presetName];
         try {
-          acquired = await navigator.mediaDevices.getUserMedia(buildConstraints());
+          acquired = await navigator.mediaDevices.getUserMedia(buildConstraints(acquiredProfile, requestedFacing));
           break;
         } catch (error) {
           lastError = error;
-          if (startEpoch !== epoch) throw new Error("Camera start cancelled");
+          if (startEpoch !== startGeneration) throw new Error("Camera start cancelled");
+          const name = (error as { name?: string })?.name;
+          if (name !== "OverconstrainedError" && name !== "ConstraintNotSatisfiedError") {
+            throw normalizeCameraError(error, requestedFacing);
+          }
         }
       }
 
-      if (!acquired) {
+      if (!acquired && requestedFacing === "user") {
         try {
           acquired = await navigator.mediaDevices.getUserMedia({
             audio: false,
@@ -220,17 +236,29 @@ export function createCameraController(options: CameraControllerOptions) {
         }
       }
 
-      if (startEpoch !== epoch) {
+      if (startEpoch !== startGeneration) {
         acquired?.getTracks().forEach(track => track.stop());
         throw new Error("Camera start cancelled");
       }
-      if (!acquired) throw normalizeCameraError(lastError);
+      if (!acquired) throw normalizeCameraError(lastError, requestedFacing);
+      const track = acquired.getVideoTracks()[0];
+      const actualFacing = track?.getSettings?.().facingMode;
+      if (requestedFacing === "environment" && actualFacing && actualFacing !== "environment") {
+        acquired.getTracks().forEach(track => track.stop());
+        throw new Error("This device did not provide a rear camera. Choose the front camera or use a device with a rear camera.");
+      }
+      profile = acquiredProfile;
       stream = acquired;
 
-      const track = stream.getVideoTracks()[0];
       track?.addEventListener("ended", () => {
+        if (startEpoch !== startGeneration || stream !== acquired) return;
+        startGeneration++;
+        epoch++;
         running = false;
         stopScheduling();
+        stopTracks();
+        document.removeEventListener("visibilitychange", handleVisibility);
+        window.removeEventListener("orientationchange", handleOrientation);
         options.onDisconnect?.();
       });
 
@@ -238,14 +266,16 @@ export function createCameraController(options: CameraControllerOptions) {
       video.muted = true;
       video.playsInline = true;
       try { await video.play(); } catch (error) {
-        acquired.getTracks().forEach(track => track.stop());
-        if (startEpoch === epoch) stopTracks();
-        throw normalizeCameraError(error);
+        if (startEpoch !== startGeneration) throw new Error("Camera start cancelled");
+        stopTracks();
+        throw normalizeCameraError(error, requestedFacing);
       }
-      if (startEpoch !== epoch) {
-        acquired.getTracks().forEach(track => track.stop());
+      if (startEpoch !== startGeneration) {
         throw new Error("Camera start cancelled");
       }
+      // A preferred front request may legally resolve to a rear camera. Trust
+      // reported facing only after this acquisition and playback are still current.
+      if(actualFacing === "user" || actualFacing === "environment") facingMode=actualFacing;
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("orientationchange", handleOrientation);
       document.addEventListener("visibilitychange", handleVisibility);
@@ -259,7 +289,7 @@ export function createCameraController(options: CameraControllerOptions) {
       scheduleFrame();
 
       return {
-        profile,
+        profile: effectiveProfile(),
         settings: track?.getSettings?.() ?? {},
       };
     },
@@ -273,8 +303,16 @@ export function createCameraController(options: CameraControllerOptions) {
       scheduleFrame();
     },
     async setFacingMode(next: "user" | "environment") {
+      const previousFacing = facingMode;
       facingMode = next; options.onReset?.();
-      return this.start(profile.preset);
+      const starting = this.start(profile.preset);
+      const switchGeneration = requestGeneration;
+      try {
+        return await starting;
+      } catch (error) {
+        if (switchGeneration === requestGeneration) facingMode = previousFacing;
+        throw error;
+      }
     },
     async adaptLatency(latencyMs: number) {
       slowFrames = latencyMs > 65 ? slowFrames + 1 : 0;
@@ -285,15 +323,16 @@ export function createCameraController(options: CameraControllerOptions) {
     },
     async setPreset(nextPreset: CameraPreset) {
       if (profile.preset === nextPreset && running) {
-        return profile;
+        return effectiveProfile();
       }
       profile = CAMERA_PROFILES[nextPreset];
       if (running) {
         await this.start(nextPreset);
       }
-      return profile;
+      return effectiveProfile();
     },
     stop() {
+      startGeneration++;
       epoch++;
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("orientationchange", handleOrientation);
@@ -305,7 +344,7 @@ export function createCameraController(options: CameraControllerOptions) {
       return running;
     },
     getProfile() {
-      return profile;
+      return effectiveProfile();
     },
   };
 }

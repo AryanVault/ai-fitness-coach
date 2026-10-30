@@ -49,3 +49,11 @@ Files: `docs/camera-engine-validation-2026-10-29.md`, replay benchmark/tests.
 - [x] Run unit tests, lint, type checking, build, and camera browser regressions.
 - [x] Review entire supplied design law; repair visual/interaction issues.
 - [x] Record exact results and remaining physical-device validation; commit reviewed changes locally.
+
+### Task 6: Automated laptop/Android follow-up, completed 30 October
+- [x] Reproduce and fix acquisition cancellation, retired streams, rear-camera identity, worker/camera failure and frozen-audio timing.
+- [x] Verify session preservation, stale-report isolation, profile gating and idempotent save recovery.
+- [x] Verify touch dragging, rotation, contrast and text bounds; recheck the full design law.
+- [x] Coordinate the concurrent tracking/game upgrade, isolate build outputs and verify the combined source freeze.
+- [x] Verify model recovery provenance/checksums, Node 22 unit/database/browser checks, production image and real worker execution.
+- [x] Record results and remaining hardware/staging limits in `docs/device-camera-validation-2026-10-29.md`.

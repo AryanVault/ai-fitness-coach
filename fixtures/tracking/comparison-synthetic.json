@@ -1,0 +1,359 @@
+{
+  "version": "tracking-comparison-v1",
+  "synthetic": true,
+  "annotationSource": "Authored four-joint geometry for software regression only",
+  "aspectRatio": 1,
+  "joints": [
+    11,
+    12,
+    23,
+    24
+  ],
+  "frames": [
+    {
+      "id": "frame-1",
+      "landmarks": [
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.4,
+          "y": 0.3,
+          "visibility": 1
+        },
+        {
+          "x": 0.6,
+          "y": 0.3,
+          "visibility": 1
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.4,
+          "y": 0.6,
+          "visibility": 1
+        },
+        {
+          "x": 0.6,
+          "y": 0.6,
+          "visibility": 1
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "visibility": 0
+        }
+      ]
+    }
+  ],
+  "predictions": {
+    "synthetic-perfect": [
+      {
+        "id": "frame-1",
+        "landmarks": [
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.4,
+            "y": 0.3,
+            "visibility": 1
+          },
+          {
+            "x": 0.6,
+            "y": 0.3,
+            "visibility": 1
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.4,
+            "y": 0.6,
+            "visibility": 1
+          },
+          {
+            "x": 0.6,
+            "y": 0.6,
+            "visibility": 1
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          },
+          {
+            "x": 0.5,
+            "y": 0.5,
+            "visibility": 0
+          }
+        ],
+        "inferenceMs": 0
+      }
+    ]
+  }
+}

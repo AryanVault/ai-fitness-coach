@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  distDir: process.env.FITCOACH_BUILD_DIR || ".next",
   output: "standalone",
   poweredByHeader: false,
   async headers() {

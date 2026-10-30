@@ -61,6 +61,12 @@ describe("frame quality evaluation", () => {
     expect(result.frameQuality).toBe("ready");
     expect(result.view).toBe("front");
   });
+  it("accepts the clearly visible right side for a pushup without requiring the hidden left arm and leg",()=>{
+    const p=createLandmarks();setFrontBody(p);
+    for(const [i,x,y] of [[11,.35,.3],[12,.37,.3],[23,.58,.3],[24,.60,.3],[14,.37,.475],[16,.37,.65],[26,.74,.3],[28,.87,.3]])p[i]={x,y,visibility:.99};
+    for(const i of [13,15,25,27])p[i].visibility=0;
+    expect(evaluateFrameQuality({exerciseId:"pushup",landmarks:p,worldLandmarks:[],fps:30,brightness:120,motion:0}).ready).toBe(true);
+  });
 
   it("blocks push-up coaching when the camera angle is front-facing instead of side-on", () => {
     const landmarks = createLandmarks();

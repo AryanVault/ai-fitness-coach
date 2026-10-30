@@ -10,7 +10,7 @@ export function smoothLandmarks(previous: Landmark[] | null, next: Landmark[], a
     return {
       x: prior.x + (landmark.x - prior.x) * alpha,
       y: prior.y + (landmark.y - prior.y) * alpha,
-      z: (prior.z ?? 0) + ((landmark.z ?? 0) - (prior.z ?? 0)) * alpha,
+      z: landmark.z === undefined ? undefined : (prior.z ?? landmark.z) + (landmark.z - (prior.z ?? landmark.z)) * alpha,
       visibility: landmark.visibility ?? 0,
     };
   });
@@ -91,6 +91,7 @@ export function buildTrackingFrame(options: {
   imageAspectRatio?: number;
   previousSmoothed: Landmark[] | null;
   filteredLandmarks?: Landmark[];
+  observedLandmarks?: Landmark[];
   timestampMs: number;
   frameIndex: number;
   fps: number;
@@ -101,7 +102,7 @@ export function buildTrackingFrame(options: {
   const motion = typeof options.motion === "number" ? options.motion : estimateMotion(options.previousSmoothed, smoothedLandmarks);
   const quality = evaluateFrameQuality({
     exerciseId: options.exerciseId,
-    landmarks: options.rawLandmarks,
+    landmarks: options.observedLandmarks ?? options.rawLandmarks,
     worldLandmarks: options.worldLandmarks ?? [],
     fps: options.fps,
     brightness: options.brightness,
@@ -126,7 +127,7 @@ export function buildTrackingFrame(options: {
     viewMessage: quality.allowedViews.includes(quality.view) ? "Camera angle is valid." : quality.message,
     brightness: options.brightness,
     motion,
-    reliability: buildReliabilityMap(options.rawLandmarks),
+    reliability: buildReliabilityMap(options.observedLandmarks ?? options.rawLandmarks),
     dominantSide: inferDominantSide(smoothedLandmarks),
   };
 }
