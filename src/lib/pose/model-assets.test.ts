@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { expect, it } from "vitest";
 
 const prepare=path.resolve("scripts/prepare-tracking-models.mjs");
@@ -19,7 +20,7 @@ it("repairs missing or corrupt model assets without losing cached provenance or 
   const write=(file:string,data:string|Buffer)=>{const full=path.join(root,file);mkdirSync(path.dirname(full),{recursive:true});writeFileSync(full,data);};
   const bootstrap=path.join(root,"fetch-stub.mjs");
   writeFileSync(bootstrap,'globalThis.fetch=async()=>new Response(new Uint8Array(1200).fill(Number(process.env.FIXTURE_BYTE)),{headers:{"content-type":"application/octet-stream"}});');
-  const run=(byte=102)=>execFileSync(process.execPath,["--import",bootstrap,prepare],{cwd:root,env:{NODE_ENV:"test",FIXTURE_BYTE:String(byte)},stdio:"pipe"});
+  const run=(byte=102)=>execFileSync(process.execPath,["--import",pathToFileURL(bootstrap).href,prepare],{cwd:root,env:{NODE_ENV:"test",FIXTURE_BYTE:String(byte)},stdio:"pipe"});
   const pins=[...assets].map(([file,data])=>({path:file,sha256:hash(data)}));
   try {
     write(heavy,assets.get(heavy)!);write(model,modelBytes);write(manifest,JSON.stringify(pins));

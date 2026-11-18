@@ -51,11 +51,11 @@ describe("request guard", () => {
 afterEach(()=>{vi.unstubAllEnvs();vi.unstubAllGlobals();});
 describe("shared production quotas",()=>{
  it("fails closed when Redis cannot verify limits",async()=>{
-  vi.stubEnv("NODE_ENV","production");vi.stubEnv("UPSTASH_REDIS_REST_URL","https://redis.example");vi.stubEnv("UPSTASH_REDIS_REST_TOKEN","test-only");vi.stubGlobal("fetch",vi.fn(async()=>{throw new Error("network");}));
+  vi.stubEnv("NODE_ENV","production");vi.stubEnv("NEXT_PUBLIC_APP_URL","http://localhost:3000");vi.stubEnv("TRUSTED_ORIGINS","");vi.stubEnv("UPSTASH_REDIS_REST_URL","https://redis.example");vi.stubEnv("UPSTASH_REDIS_REST_TOKEN","test-only");vi.stubGlobal("fetch",vi.fn(async()=>{throw new Error("network");}));
   const result=await guardMutationRequest(new Request("http://localhost:3000/api/chat",{method:"POST",headers:{origin:"http://localhost:3000"}}),{bucket:"chat",key:"user",limit:24,windowMs:60000});expect(result?.status).toBe(503);
  });
  it("uses a daily user quota separately from burst limits",async()=>{
-  vi.stubEnv("NODE_ENV","production");vi.stubEnv("UPSTASH_REDIS_REST_URL","https://redis.example");vi.stubEnv("UPSTASH_REDIS_REST_TOKEN","test-only");
+  vi.stubEnv("NODE_ENV","production");vi.stubEnv("NEXT_PUBLIC_APP_URL","http://localhost:3000");vi.stubEnv("TRUSTED_ORIGINS","");vi.stubEnv("UPSTASH_REDIS_REST_URL","https://redis.example");vi.stubEnv("UPSTASH_REDIS_REST_TOKEN","test-only");
   const fetch=vi.fn().mockResolvedValueOnce(Response.json({result:[1,60000]})).mockResolvedValueOnce(Response.json({result:[21,50000]}));vi.stubGlobal("fetch",fetch);
   const result=await guardMutationRequest(new Request("http://localhost:3000/api/chat",{method:"POST",headers:{origin:"http://localhost:3000"}}),{bucket:"chat",key:"user",limit:24,windowMs:60000});expect(result?.status).toBe(429);expect(fetch).toHaveBeenCalledTimes(2);
  });
